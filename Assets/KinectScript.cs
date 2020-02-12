@@ -46,12 +46,11 @@ public class KinectScript : MonoBehaviour
         });
 
         transformation = device.GetCalibration().CreateTransformation();
-
-        depthWidth = device.GetCalibration().depth_camera_calibration.resolution_width;
-        depthHeight = device.GetCalibration().depth_camera_calibration.resolution_height;
+        depthWidth = device.GetCalibration().DepthCameraCalibration.ResolutionWidth;
+        depthHeight = device.GetCalibration().DepthCameraCalibration.ResolutionHeight;
         pointNum = depthWidth * depthHeight;
-
     }
+
     void InitMesh()
     {
         mesh = new Mesh();
