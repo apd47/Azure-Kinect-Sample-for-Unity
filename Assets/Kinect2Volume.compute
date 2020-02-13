@@ -1,0 +1,59 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+Texture2D<float4> ColorTex;
+Texture2D<float4> DepthTex;
+
+Texture2D<float4> oldDepthTexture;
+RWTexture3D<float4> Result;
+
+SamplerState _PointClamp, _PointRepeat;
+
+float4 _Size;
+
+int minDepth;
+int maxDepth;
+
+[numthreads(16, 16, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+	float3 uv = float3((float)id.x / _Size.x, (float)id.y / _Size.y, (float)id.z / _Size.z);
+
+	float4 col = ColorTex.SampleLevel(_PointClamp, uv.xy, 0);
+	uint depth = DepthTex.SampleLevel(_PointClamp, uv.xy, 0).r * 65536;
+	uint oldDepth = oldDepthTexture.SampleLevel(_PointClamp, uv.xy, 0).r * 65536;
+
+	float stepSize = ((float)(maxDepth - minDepth) / _Size.z);
+
+	int oldDepthIndex = (oldDepth - minDepth) / stepSize;
+	uint3 oldIndex = uint3(id.x, _Size.y - id.y, oldDepthIndex);
+	Result[oldIndex] = float4(0, 0, 0, 0);
+	oldIndex = uint3(id.x, _Size.y - id.y, oldDepthIndex + 1);
+	Result[oldIndex] = float4(0, 0, 0, 0);
+	oldIndex = uint3(id.x, _Size.y - id.y, oldDepthIndex + 2);
+	Result[oldIndex] = float4(0, 0, 0, 0);
+	oldIndex = uint3(id.x, _Size.y - id.y, oldDepthIndex - 1);
+	Result[oldIndex] = float4(0, 0, 0, 0);
+	oldIndex = uint3(id.x, _Size.y - id.y, oldDepthIndex - 2);
+	Result[oldIndex] = float4(0, 0, 0, 0);
+
+	if (depth < maxDepth && depth > minDepth)
+	{
+		int depthIndex = (depth - minDepth) / stepSize;
+		uint3 index = uint3(id.x, _Size.y - id.y, depthIndex);
+		Result[index] = float4(col.rgb, 1);
+		index = uint3(id.x, _Size.y - id.y, depthIndex + 1);
+		Result[index] = float4(col.rgb, 0.6);
+		index = uint3(id.x, _Size.y - id.y, depthIndex + 2);
+		Result[index] = float4(col.rgb, 0.3);
+		index = uint3(id.x, _Size.y - id.y, depthIndex - 1);
+		Result[index] = float4(col.rgb, 0.6);
+		index = uint3(id.x, _Size.y - id.y, depthIndex - 2);
+		Result[index] = float4(col.rgb, 0.3);
+	}
+
+}
+
+

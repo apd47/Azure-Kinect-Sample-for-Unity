@@ -1,4 +1,4 @@
 sceneSetups:
-- path: Assets/AzureKinectSample.unity
+- path: Assets/Scenes/Volume.unity
   isLoaded: 1
   isActive: 1
