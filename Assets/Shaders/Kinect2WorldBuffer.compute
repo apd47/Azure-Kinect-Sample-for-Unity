@@ -1,0 +1,54 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+Texture2D<float4> ColorTex;
+Texture2D<float4> DepthTex;
+
+Texture2D<float4> oldDepthTexture;
+uniform RWStructuredBuffer<float4> ResultBuffer;
+
+SamplerState _PointClamp, _PointRepeat;
+int minDepth;
+int maxDepth;
+int _MatrixX, _MatrixY, _MatrixZ;
+float4 _IMUQuaternion;
+
+int GetBufferIndex(uint3 indices, uint3 matrixSize) {
+	return indices.z * matrixSize.x * matrixSize.y + indices.x * matrixSize.y + indices.y;
+}
+
+uint3 GetVolumeIndices(uint index, uint3 matrixSize) {
+	uint3 indices = uint3(0, 0, 0);
+	indices.z = index / (matrixSize.x * matrixSize.y);
+	indices.x = (index - (indices.z * matrixSize.x * matrixSize.y)) / matrixSize.y;
+	indices.y = index - (indices.z * matrixSize.x * matrixSize.y) - indices.x * matrixSize.y;
+	return indices;
+}
+
+#pragma kernel ToBuffer
+[numthreads(16, 16, 1)]
+void ToBuffer(uint3 id : SV_DispatchThreadID)
+{
+	uint3 matrixSize = uint3(_MatrixX, _MatrixY, _MatrixZ);
+
+	float2 uv = float2((float)id.x / matrixSize.x, (float)id.y / matrixSize.y);
+
+	float4 col = ColorTex.SampleLevel(_PointClamp, uv, 0);
+	uint depth = DepthTex.SampleLevel(_PointClamp, uv, 0).r * 65536;
+
+	float stepSize = ((float)(maxDepth - minDepth) / matrixSize.z);
+	int depthIndex = (float)(depth - minDepth) / stepSize;
+
+	float3 uvVector = float3(((float)id.x / (float)matrixSize.x), ((float)id.y / (float)matrixSize.y), ((float)depthIndex / (float)matrixSize.z));
+
+	float3 uvRotated = dot(_IMUQuaternion, uvVector);
+
+	int3 index = uvRotated * matrixSize;
+
+	ResultBuffer[GetBufferIndex(index, matrixSize)] = float4(col.rgb, 1);
+
+}
+
+
+

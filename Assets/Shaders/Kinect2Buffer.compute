@@ -1,0 +1,71 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+Texture2D<float4> ColorTex;
+Texture2D<float4> DepthTex;
+
+Texture2D<float4> oldDepthTexture;
+uniform RWStructuredBuffer<float4> ResultBuffer;
+
+SamplerState _PointClamp, _PointRepeat;
+int minDepth;
+int maxDepth;
+int _MatrixX,_MatrixY, _MatrixZ;
+
+int GetBufferIndex(uint3 indices, uint3 matrixSize) {
+	return indices.z * matrixSize.x * matrixSize.y + indices.x * matrixSize.y + indices.y;
+}
+
+uint3 GetVolumeIndices(uint index, uint3 matrixSize) {
+	uint3 indices = uint3(0, 0, 0);
+	indices.z = index / (matrixSize.x * matrixSize.y);
+	indices.x = (index - (indices.z * matrixSize.x * matrixSize.y)) / matrixSize.y;
+	indices.y = index - (indices.z * matrixSize.x * matrixSize.y) - indices.x * matrixSize.y;
+	return indices;
+}
+
+#pragma kernel ToBuffer
+[numthreads(16,16,1)]
+void ToBuffer(uint3 id : SV_DispatchThreadID)
+{
+	uint3 matrixSize = uint3(_MatrixX, _MatrixY, _MatrixZ);
+
+	float3 uv = float3((float)id.x / matrixSize.x, (float)id.y / matrixSize.y, (float)id.z / matrixSize.z);
+
+	float4 col = ColorTex.SampleLevel(_PointClamp, uv.xy, 0);
+	uint depth = DepthTex.SampleLevel(_PointClamp, uv.xy, 0).r * 65536;
+	uint oldDepth = oldDepthTexture.SampleLevel(_PointClamp, uv.xy, 0).r * 65536;
+
+	float stepSize = ((float)(maxDepth - minDepth) / matrixSize.z);
+
+	int oldDepthIndex = (oldDepth - minDepth) / stepSize;
+	uint3 oldIndex = uint3(id.x, matrixSize.y - id.y, oldDepthIndex);
+	ResultBuffer[GetBufferIndex(oldIndex, matrixSize)] = float4(0, 0, 0, 0);
+	oldIndex = uint3(id.x, matrixSize.y - id.y, oldDepthIndex + 1);
+	ResultBuffer[GetBufferIndex(oldIndex, matrixSize)] = float4(0, 0, 0, 0);
+	oldIndex = uint3(id.x, matrixSize.y - id.y, oldDepthIndex + 2);
+	ResultBuffer[GetBufferIndex(oldIndex, matrixSize)] = float4(0, 0, 0, 0);
+	oldIndex = uint3(id.x, matrixSize.y - id.y, oldDepthIndex - 1);
+	ResultBuffer[GetBufferIndex(oldIndex, matrixSize)] = float4(0, 0, 0, 0);
+	oldIndex = uint3(id.x, matrixSize.y - id.y, oldDepthIndex - 2);
+	ResultBuffer[GetBufferIndex(oldIndex, matrixSize)] = float4(0, 0, 0, 0);
+
+	if (depth < maxDepth && depth > minDepth)
+	{
+		int depthIndex = (depth - minDepth) / stepSize;
+		uint3 index = uint3(id.x, matrixSize.y - id.y, depthIndex);
+		ResultBuffer[GetBufferIndex(index, matrixSize)] = float4(col.rgb, 1);
+		index = uint3(id.x, matrixSize.y - id.y, depthIndex + 1);
+		ResultBuffer[GetBufferIndex(index, matrixSize)] = float4(col.rgb, 0.6);
+		index = uint3(id.x, matrixSize.y - id.y, depthIndex + 2);
+		ResultBuffer[GetBufferIndex(index, matrixSize)] = float4(col.rgb, 0.3);
+		index = uint3(id.x, matrixSize.y - id.y, depthIndex - 1);
+		ResultBuffer[GetBufferIndex(index, matrixSize)] = float4(col.rgb, 0.6);
+		index = uint3(id.x, matrixSize.y - id.y, depthIndex - 2);
+		ResultBuffer[GetBufferIndex(index, matrixSize)] = float4(col.rgb, 0.3);
+	}
+}
+
+
+
