@@ -89,9 +89,9 @@
 			SubShader{
 
 				Cull Off
-				Lighting Off
-				ZWrite Off
-				ColorMask RGB
+				//Lighting Off
+				//ZWrite Off
+				//ColorMask RGB
 				AlphaTest Greater .01
 				Blend SrcAlpha OneMinusSrcAlpha
 				ColorMaterial AmbientAndDiffuse
@@ -159,7 +159,7 @@
 
 						//return half4(finalColor);
 
-						return half4(finalColor.r, finalColor.g, finalColor.b, 1);
+						return half4(finalColor.rgb, 1);
 					}
 
 					ENDCG

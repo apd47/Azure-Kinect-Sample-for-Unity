@@ -24,13 +24,13 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Floats:
-    - _BlackCutoff: 0.278
-    - _Intensity: 1.44
-    - _MatrixX: 320
-    - _MatrixY: 288
-    - _MatrixZ: 450
-    - _MaxSteps: 212
-    - _RaymarchAlpha: 0.569
+    - _BlackCutoff: 0.179
+    - _Intensity: 1
+    - _MatrixX: 640
+    - _MatrixY: 503
+    - _MatrixZ: 358
+    - _MaxSteps: 520
+    - _RaymarchAlpha: 0.5
     - _StepSize: 0.001
     m_Colors:
     - _MatrixSize: {r: 64, g: 64, b: 64, a: 0}

@@ -4,5 +4,11 @@
 EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
-  m_Scenes: []
+  m_Scenes:
+  - enabled: 0
+    path: Assets/Scenes/Buffer Sender.unity
+    guid: 446bafbc7b02eab4b95d432678130756
+  - enabled: 1
+    path: Assets/Scenes/Depth Only.unity
+    guid: 0ac7b8a30a204484291560293b96d850
   m_configObjects: {}

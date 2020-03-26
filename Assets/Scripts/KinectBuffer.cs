@@ -1,14 +1,23 @@
 ﻿using Microsoft.Azure.Kinect.Sensor;
 using System;
+using System.Diagnostics;
+using System.IO;
+using System.IO.Compression;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
 public class KinectBuffer : MonoBehaviour
 {
-
-    Texture2D colorTexture;
-    Texture2D depthTexture;
-    Texture2D oldDepthTexture;
+    [HideInInspector]
+    public Texture2D colorTexture;
+    [HideInInspector]
+    public Texture2D depthTexture;
+    [HideInInspector]
+    public Texture2D oldDepthTexture;
 
     Vector3 currentAngles;
     Transformation transformation;
@@ -30,6 +39,7 @@ public class KinectBuffer : MonoBehaviour
 
     [Header("Rendering Settings")]
     public ComputeShader shader;
+    public Filter filter;
     public Vector3 volumeScale = new Vector3(0.5f, 0.5f, 1f);
     public Vector3Int matrixSize;
 
@@ -51,8 +61,26 @@ public class KinectBuffer : MonoBehaviour
 
     public int maxDepthMM = 10000;
     public int minDepthMM = 500;
+    public Vector2 depthRangeModifier;
     bool running = true;
 
+    DepthMode lastDepthMode;
+    ColorResolution lastColorResolution;
+    FPS lastFPS;
+    TransformationMode lastTransformationMode;
+    Vector3 lastVolumeScale;
+    Vector2 lastDepthRangeModifier;
+
+    int frameID = 0;
+
+    [Header("Networking")]
+    public bool performCompression;
+    public bool sendVolumeDataToClients;
+    public string localServerIP;
+    public int portNumber;
+
+    int computeShaderKernelIndex = -1;
+    float worldscaleDepth;
 
     public enum TransformationMode
     {
@@ -72,24 +100,150 @@ public class KinectBuffer : MonoBehaviour
 
     private void OnDestroy()
     {
-        volumeBuffer.Release();
         running = false;
-        device.StopCameras();
-        device.StopImu();
-        Destroy(colorTexture);
-        Destroy(depthTexture);
-        Destroy(oldDepthTexture);
+        if (volumeBuffer != null)
+        {
+            volumeBuffer.Release();
+            volumeBuffer = null;
+        }
+
+        if (device != null)
+        {
+            device.StopCameras();
+            device.StopImu();
+            device.Dispose();
+        }
+        if (colorTexture != null)
+            Destroy(colorTexture);
+        if (depthTexture != null)
+            Destroy(depthTexture);
+        if (oldDepthTexture != null)
+            Destroy(oldDepthTexture);
     }
 
-    void Start()
+    public byte[] Compress(byte[] data)
     {
-        InitKinect();
-        Task CameraLooper = CameraLoop(device);
-        Task IMULooper = IMULoop(device);
+        int thisFrameID = frameID;
+        frameID++;
+        Stopwatch stopWatch = new Stopwatch();
+        stopWatch.Start();
+        using (MemoryStream output = new MemoryStream())
+        {
+            using (DeflateStream dstream = new DeflateStream(output, System.IO.Compression.CompressionLevel.Optimal))
+            {
+                dstream.Write(data, 0, data.Length);
+            }
+
+            byte[] outArray = output.ToArray();
+            stopWatch.Stop();
+
+            TimeSpan ts = stopWatch.Elapsed;
+            print(thisFrameID + " || Raw Volume Frame Size: " + (float)data.Length / (1024 * 1024) + "Mb" + "|| Compressed Volume Frame to Size: " + (float)outArray.Length / (1024 * 1024) + "Mb in " + ts.TotalMilliseconds + "ms");
+
+            if (myList == null)
+            {
+                print("TCP Socket not found. Initializing.");
+                StartTCPServer();
+            }
+            else
+            {
+                if (connectedToClient)
+                {
+                    stopWatch.Reset();
+                    stopWatch.Start();
+                    SendOverSocket(outArray);
+                    stopWatch.Stop();
+                    print(thisFrameID + " || Sent Volume Frame of Size: " + (float)outArray.Length / (1024 * 1024) + "Mb in " + ts.TotalMilliseconds + "ms");
+                }
+                else
+                {
+                    print("No client available");
+                }
+            }
+
+            return output.ToArray();
+        }
     }
 
-    void InitKinect()
+    Socket tcpSocket;
+    TcpListener myList;
+    bool connectedToClient = false;
+
+    public void StartTCPServer()
     {
+        try
+        {
+            IPAddress ipAd = IPAddress.Parse(localServerIP);
+            myList = new TcpListener(ipAd, portNumber);
+
+            /* Start Listeneting at the specified port */
+            myList.Start();
+
+            print("The server is running at port: " + portNumber);
+            //print("The local End point is  :" + myList.LocalEndpoint);
+            print("Waiting for a connection.....");
+
+            tcpSocket = myList.AcceptSocket();
+            connectedToClient = true;
+            print("Connection accepted from " + tcpSocket.RemoteEndPoint);
+        }
+        catch (Exception e)
+        {
+            print("Error..... " + e.StackTrace);
+        }
+    }
+
+    public void SendOverSocket(byte[] data)
+    {
+        tcpSocket.Send(data);
+    }
+
+    public byte[] Decompress(byte[] data)
+    {
+        MemoryStream input = new MemoryStream(data);
+        MemoryStream output = new MemoryStream();
+        using (DeflateStream dstream = new DeflateStream(input, CompressionMode.Decompress))
+        {
+            dstream.CopyTo(output);
+        }
+        return output.ToArray();
+    }
+
+    private void Update()
+    {
+        CheckForChanges();
+    }
+
+    void CheckForChanges()
+    {
+        if ((lastDepthMode != depthMode) || (lastColorResolution != colorResolution) || (lastFPS != fps) || (lastTransformationMode != transformationMode) || (lastVolumeScale != volumeScale) || (depthRangeModifier != lastDepthRangeModifier))
+        {
+            StartKinect();
+
+            minDepthMM = (int)(depthRanges[(int)device.CurrentDepthMode].x * depthRangeModifier.x);
+            maxDepthMM = (int)(depthRanges[(int)device.CurrentDepthMode].y * depthRangeModifier.y);
+            worldscaleDepth = (maxDepthMM - minDepthMM) / 1000;
+
+            mesh.transform.localPosition = new Vector3(0, 0, worldscaleDepth / 2);
+
+            if (transformationMode == TransformationMode.DepthToColor)
+                mesh.transform.localScale = new Vector3(1.6f * worldscaleDepth / 3, 0.9f * worldscaleDepth / 3, worldscaleDepth);
+            if (transformationMode == TransformationMode.ColorToDepth)
+                mesh.transform.localScale = new Vector3(worldscaleDepth / 3, worldscaleDepth / 3, worldscaleDepth);
+
+            lastDepthMode = depthMode;
+            lastColorResolution = colorResolution;
+            lastFPS = fps;
+            lastTransformationMode = transformationMode;
+            lastVolumeScale = volumeScale;
+            lastDepthRangeModifier = depthRangeModifier;
+        }
+    }
+
+
+    void StartKinect()
+    {
+        OnDestroy();
         device = Device.Open(deviceID);
         device.StartCameras(new DeviceConfiguration
         {
@@ -99,19 +253,12 @@ public class KinectBuffer : MonoBehaviour
             SynchronizedImagesOnly = true,
             CameraFPS = fps,
         });
-
-        minDepthMM = depthRanges[(int)device.CurrentDepthMode].x;
-        maxDepthMM = depthRanges[(int)device.CurrentDepthMode].y;
-
-
-        float worldscaleDepth = (maxDepthMM - minDepthMM) / 1000;
-        Vector3 currentScale = mesh.transform.localScale;
-        mesh.transform.localScale = new Vector3(currentScale.x, currentScale.y, worldscaleDepth);
-        mesh.transform.localPosition = new Vector3(0, 0, 0.5f * worldscaleDepth);
         device.StartImu();
         transformation = device.GetCalibration().CreateTransformation();
+        running = true;
+        Task CameraLooper = CameraLoop(device);
+        Task IMULooper = IMULoop(device);
     }
-
 
     private async Task CameraLoop(Device device)
     {
@@ -138,16 +285,18 @@ public class KinectBuffer : MonoBehaviour
                             break;
                     }
 
-                    if(volumeBuffer == null)
+                    if (volumeBuffer == null)
                     {
                         matrixSize = new Vector3Int((int)(finalColor.WidthPixels * volumeScale.x), (int)(finalColor.HeightPixels * volumeScale.y), (int)((depthRanges[(int)device.CurrentDepthMode].y - depthRanges[(int)device.CurrentDepthMode].x) / 11 * volumeScale.z));
                         volumeBuffer = new ComputeBuffer(matrixSize.x * matrixSize.y * matrixSize.z, 4 * sizeof(float), ComputeBufferType.Default);
+                        print("Made Volume Buffer");
                     }
 
                     if (colorTexture == null)
                     {
                         colorTexture = new Texture2D(finalColor.WidthPixels, finalColor.HeightPixels, TextureFormat.BGRA32, false);
                         colorData = new byte[finalColor.Memory.Length];
+                        print("Made Color Texture");
                     }
 
                     if (depthTexture == null)
@@ -155,6 +304,7 @@ public class KinectBuffer : MonoBehaviour
                         depthTexture = new Texture2D(finalDepth.WidthPixels, finalDepth.HeightPixels, TextureFormat.R16, false);
                         oldDepthTexture = new Texture2D(finalDepth.WidthPixels, finalDepth.HeightPixels, TextureFormat.R16, false);
                         depthData = new byte[finalDepth.Memory.Length];
+                        print("Made Depth Texture");
                     }
 
                     colorData = finalColor.Memory.ToArray();
@@ -165,19 +315,14 @@ public class KinectBuffer : MonoBehaviour
                     depthTexture.LoadRawTextureData(depthData);
                     depthTexture.Apply();
 
-                    // Apply Buffer Updates
-                    int kernelIndex = shader.FindKernel("ToBuffer");
-                    shader.SetInt("_MatrixX", matrixSize.x);
-                    shader.SetInt("_MatrixY", matrixSize.y);
-                    shader.SetInt("_MatrixZ", matrixSize.z);
-                    
-                    shader.SetTexture(kernelIndex, "ColorTex", colorTexture);
-                    shader.SetTexture(kernelIndex, "DepthTex", depthTexture);
-                    shader.SetTexture(kernelIndex, "oldDepthTexture", oldDepthTexture);
-                    shader.SetBuffer(kernelIndex, "ResultBuffer", volumeBuffer);
-                    shader.SetInt("minDepth", minDepthMM);
-                    shader.SetInt("maxDepth", maxDepthMM);
-                    shader.Dispatch(kernelIndex, matrixSize.x/8, matrixSize.y/8, matrixSize.z/8);
+                    configureComputeShader();
+
+                    shader.Dispatch(computeShaderKernelIndex, matrixSize.x / 16, matrixSize.y / 16, 1);
+
+                    byte[] colors = new byte[matrixSize.x * matrixSize.y * matrixSize.z];
+                    volumeBuffer.GetData(colors);
+
+                    ThreadPool.QueueUserWorkItem((state) => Compress((Byte[])state), colors);
 
                     matt.SetBuffer("colors", volumeBuffer);
                     matt.SetInt("_MatrixX", matrixSize.x);
@@ -191,6 +336,42 @@ public class KinectBuffer : MonoBehaviour
             {
                 await Task.Run(() => { });
             }
+        }
+    }
+
+    private int _a;
+    private int _b;
+
+    public KinectBuffer(int a, int b)
+    {
+        (_a, _b) = (a, b);
+    }
+
+    private void configureComputeShader()
+    {
+        // Apply Buffer Updates
+        computeShaderKernelIndex = shader.FindKernel("ToBuffer");
+        shader.SetInt("_MatrixX", matrixSize.x);
+        shader.SetInt("_MatrixY", matrixSize.y);
+        shader.SetInt("_MatrixZ", matrixSize.z);
+
+        shader.SetTexture(computeShaderKernelIndex, "ColorTex", colorTexture);
+        shader.SetTexture(computeShaderKernelIndex, "DepthTex", depthTexture);
+        shader.SetTexture(computeShaderKernelIndex, "oldDepthTexture", oldDepthTexture);
+        shader.SetBuffer(computeShaderKernelIndex, "ResultBuffer", volumeBuffer);
+        shader.SetInt("minDepth", minDepthMM);
+        shader.SetInt("maxDepth", maxDepthMM);
+
+        if (filter.useFilter)
+        {
+            Vector4 filterValue = filter.getFilterValue();
+            shader.SetVector("filterColor", filterValue);
+            shader.SetInt("filterType", (int)filter.filterType);
+        }
+        else
+        {
+            shader.SetVector("filterColor", new Vector4(0.5f, 0.5f, 0.5f, 0.5f));
+            shader.SetInt("filterType", 0);
         }
     }
 

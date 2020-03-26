@@ -1,4 +1,4 @@
 sceneSetups:
-- path: Assets/Scenes/Processor.unity
+- path: Assets/Scenes/Buffer Sender.unity
   isLoaded: 1
   isActive: 1
