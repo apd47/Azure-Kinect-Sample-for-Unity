@@ -6,9 +6,12 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 0
-    path: Assets/Scenes/Buffer Sender.unity
+    path: Assets/Scenes/Provider.unity
     guid: 446bafbc7b02eab4b95d432678130756
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/Depth Only.unity
     guid: 0ac7b8a30a204484291560293b96d850
+  - enabled: 1
+    path: Assets/Scenes/Reciever.unity
+    guid: 2cc0649d1f81daf4f8599aefd4cfd74b
   m_configObjects: {}
