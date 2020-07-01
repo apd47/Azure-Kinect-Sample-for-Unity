@@ -52,6 +52,7 @@ public class KinectBuffer : MonoBehaviour
     public string providerName;
     public string serverHostname;
     public int serverPort;
+    public int maxPacketBytes = 1024;
     ConnectionState connectionState = ConnectionState.Disconnected;
     IPEndPoint serverEndpoint;
     Socket serverSocket;
@@ -276,7 +277,8 @@ public class KinectBuffer : MonoBehaviour
             {
                 if (connectionState == ConnectionState.JoinedServer)
                 {
-                    SendFrameToServer(thisFrameID, Convert.ToBase64String(compressedArray));
+                    SplitAndSend(maxPacketBytes, thisFrameID, Convert.ToBase64String(compressedArray));
+                    //SendFrameToServer(thisFrameID, Convert.ToBase64String(compressedArray));
                 }
             }
             catch (Exception ex)
@@ -403,7 +405,6 @@ public class KinectBuffer : MonoBehaviour
             int available = socket.Available;
             if (available > 0)
             {
-                print("Available:" + available);
                 SocketAsyncEventArgs args = new SocketAsyncEventArgs();
                 args.SetBuffer(new byte[available], 0, available);
                 args.Completed += OnDataRecieved;
@@ -542,7 +543,10 @@ public class KinectBuffer : MonoBehaviour
         {
             try
             {
-                string message = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + frameData;
+                //string message = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + frameData;
+                
+
+                
                 byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
                 serverSocket.SendTo(data, serverEndpoint);
                 //print("Frame " + frameNumber + " sent to server");
@@ -551,6 +555,38 @@ public class KinectBuffer : MonoBehaviour
             {
                 print("Error: " + x.ToString());
             }
+        }
+    }
+
+    public void SplitAndSend(int maxBytesPerMessage, int frameNumber, string frameData)
+    {
+        List<string> segments = new List<string>();
+
+        int numberOfSegments = 0;
+        string messageHeader = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + numberOfSegments + "|";
+        int availableBytesPerMessage = maxBytesPerMessage - messageHeader.Length - 5; // Subtract 5 extra for the final segment number and break character
+
+        for(int i=0; i<frameData.Length;)
+        {
+            if((frameData.Length - i - 1) > availableBytesPerMessage)
+            {
+                segments.Add(frameData.Substring(i, availableBytesPerMessage));
+                i += availableBytesPerMessage;
+                numberOfSegments++;
+            }
+            else
+            {
+                segments.Add(frameData.Substring(i, frameData.Length - 1));
+                numberOfSegments++;
+            }
+        }
+
+        messageHeader = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + numberOfSegments + "|";
+
+        for(int s=0; s<segments.Count; s++)
+        {
+            byte[] data = System.Text.Encoding.UTF8.GetBytes(messageHeader + s + "|" + segments[s]);
+            ThreadPool.QueueUserWorkItem(state => serverSocket.SendTo(data, serverEndpoint));
         }
     }
 

@@ -81,6 +81,9 @@ public class KinectSocketFrame
 {
     public KinectRemoteFile source;
     public int frameNumber;
+    public int totalSegments;
+    public string[] segments;
+    public bool fullyRecieved;
     public byte[] compressedData;
     public byte[] decompressedData;
     public bool processingDecompression;
@@ -93,19 +96,52 @@ public class KinectSocketFrame
     //    this.decompressed = false;
     //}
 
-    public KinectSocketFrame(KinectRemoteFile source, int frameNumber, string compressedData)
+    public KinectSocketFrame(KinectRemoteFile source, int frameNumber, int totalSegments)
     {
         this.source = source;
         this.frameNumber = frameNumber;
-        this.compressedData = Convert.FromBase64String(compressedData);
+        this.segments = new string[totalSegments];
         this.decompressed = false;
+        this.fullyRecieved = false;
+
         //print(source.frames.Count);
+    }
+
+    public bool ImportSegment(int segmentNumber, string segmentString)
+    {
+        segments[segmentNumber] = segmentString;
+        if(totalSegments == populatedSegments)
+        {
+            string full = "";
+            foreach(string s in segments)
+            {
+                full += s;
+            }
+            compressedData = Convert.FromBase64String(full);
+            fullyRecieved = true;
+        }
+        return fullyRecieved;
+    }
+
+    public int populatedSegments
+    {
+        get
+        {
+            int nonempty = 0;
+            foreach (string s in segments)
+            {
+                if (s != null)
+                    nonempty++;
+            }
+            return nonempty;
+        }
     }
 
     public byte[] Decompress()
     {
         // If there's already a decompression in progress, don't start another
-        if (processingDecompression)
+        // Also, don't start decompression unless the data is fully received
+        if (processingDecompression || !fullyRecieved)
         {
             return null;
         }

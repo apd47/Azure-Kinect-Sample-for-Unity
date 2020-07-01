@@ -304,8 +304,25 @@ public class KinectRemoteFile
                         Debug.Log(split[3] + " has subscribed to the provider " + split[2]);
                         break;
                     case "PROVIDE":
-                        frames.AddLast(new KinectSocketFrame(this, int.Parse(split[3]), split[4]));
-                        //Debug.Log("Frame " + split[3] + " recieved from provider " + split[2]);
+                        int frameNumber = int.Parse(split[3]);
+                        int totalSegments = int.Parse(split[4]);
+                        int segmentNumber = int.Parse(split[5]);
+                        string segmentString = split[6];
+                        // TODO: If data comes in a VERY unordered fashion, this wont work correctly because it only checks the most recent 2 frames
+                        if (frames.Last.Value.frameNumber == int.Parse(split[3]))
+                        {
+                            frames.Last.Value.ImportSegment(segmentNumber, segmentString);
+                        }
+                        else if (frames.Last.Previous.Value.frameNumber == int.Parse(split[3]))
+                        {
+                            frames.Last.Previous.Value.ImportSegment(segmentNumber, segmentString);
+                        }
+                        else
+                        {
+                            KinectSocketFrame temp = new KinectSocketFrame(this, frameNumber, totalSegments);
+                            temp.ImportSegment(segmentNumber, segmentString);
+                            frames.AddLast(temp);
+                        }
                         break;
                     default:
                         Debug.Log(split[1]);
