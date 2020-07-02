@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using UnityEngine;
 using System.Collections.Generic;
 using System.Data.SqlTypes;
+using K4os.Compression.LZ4;
 
 public class KinectBuffer : MonoBehaviour
 {
@@ -50,7 +51,7 @@ public class KinectBuffer : MonoBehaviour
     public bool pauseRecording;
     public bool stopRecording;
     bool saveToFile;
-    bool triggerWriteToFile; 
+    bool triggerWriteToFile;
     int compressedBytes = 0;
     int maxRecordingSeconds;
     int savedFrameCount;
@@ -78,13 +79,6 @@ public class KinectBuffer : MonoBehaviour
 
     #region Unity
 
-    private void Start()
-    {
-        StartKinect();
-        Task CameraLooper = CameraLoop(device);
-        Task IMULooper = IMULoop(device);
-        //Task NetworkingLooper = NetworkingLoop();
-    }
 
     private void Update()
     {
@@ -142,7 +136,7 @@ public class KinectBuffer : MonoBehaviour
 
     #region Device
 
-    void StartKinect()
+    public void StartKinect()
     {
         OnDestroy();
         device = Device.Open(deviceID);
@@ -162,9 +156,15 @@ public class KinectBuffer : MonoBehaviour
         if (kinectSettings.transformationMode == TransformationMode.DepthToColor)
             mesh.transform.localScale = new Vector3(1.6f * worldscaleDepth, 0.9f * worldscaleDepth, worldscaleDepth);
         if (kinectSettings.transformationMode == TransformationMode.ColorToDepth)
-            mesh.transform.localScale = new Vector3(worldscaleDepth * 2, worldscaleDepth * 2, worldscaleDepth);
+            mesh.transform.localScale = new Vector3(worldscaleDepth, worldscaleDepth, worldscaleDepth);
 
         running = true;
+        Task CameraLooper = CameraLoop(device);
+    }
+
+    public void StopKinect()
+    {
+        running = false;
     }
 
     private async Task CameraLoop(Device device)
@@ -233,16 +233,16 @@ public class KinectBuffer : MonoBehaviour
 
                     // TODO: Test which is faster, or if a dedicated thread would be best
                     //Option 1: Use the UserWorkItem Threadpool to manage thread for me
-                    //ThreadPool.QueueUserWorkItem((state) => Postprocess((Byte[])state), extractedVolumeBytes);
+                    ThreadPool.QueueUserWorkItem((state) => Postprocess((Byte[])state), extractedVolumeBytes);
 
                     //Option 2: Spawn a thread for each frame
-                    new Thread(() => Postprocess(extractedVolumeBytes)).Start();
+                    //new Thread(() => Postprocess(extractedVolumeBytes)).Start();
 
                     if (compressedBytes == 0)
                     {
                         byte[] compressedArray = CompressData(extractedVolumeBytes);
                         compressedBytes = compressedArray.Length;
-                        maxRecordingSeconds = (maxFileSizeMb*1000*1000) / (compressedBytes * KinectUtilities.FPStoInt(kinectSettings.fps));
+                        maxRecordingSeconds = (maxFileSizeMb * 1000 * 1000) / (compressedBytes * KinectUtilities.FPStoInt(kinectSettings.fps));
                     }
 
                     matt.SetBuffer("colors", volumeBuffer);
@@ -301,7 +301,7 @@ public class KinectBuffer : MonoBehaviour
         if (sendToServer)
         {
 
-            byte[] compressedArray = CompressData(data);
+            byte[] compressedArray = CompressDataLZ4(data);
 
             try
             {
@@ -319,7 +319,12 @@ public class KinectBuffer : MonoBehaviour
 
         if (saveToFile)
         {
-            byte[] compressedArray = CompressData(data);
+            // Use Built-in System.IO.Compression Deflate
+            //byte[] compressedArray = CompressData(data);
+
+            // Use LZ4 
+            byte[] compressedArray = CompressDataLZ4(data);
+
             try
             {
                 if (thisFrameID < base64Frames.Length)
@@ -362,6 +367,14 @@ public class KinectBuffer : MonoBehaviour
         saveToFile = false;
         triggerWriteToFile = true;
         print("Recording stopped with " + savedFrameCount + " frames in the write buffer. Attempting to write to file...");
+    }
+
+    public static byte[] CompressDataLZ4(byte[] data)
+    {
+        byte[] compressedArray = new byte[LZ4Codec.MaximumOutputSize(data.Length)];
+        int num = LZ4Codec.Encode(data, 0, data.Length, compressedArray, 0, compressedArray.Length, LZ4Level.L00_FAST);
+        Array.Resize(ref compressedArray, num);
+        return compressedArray;
     }
 
     public static byte[] CompressData(byte[] data)

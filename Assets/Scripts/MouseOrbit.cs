@@ -25,15 +25,20 @@ public class MouseOrbit : MonoBehaviour
         y = angles.x;
     }
 
+
+    bool enabled = false;
     bool clicked = false;
     void LateUpdate()
     {
         if (Input.GetMouseButtonDown(0))
+        {
             clicked = true;
+            enabled = true;
+        }
         if (Input.GetMouseButtonUp(0))
             clicked = false;
 
-        if (target)
+        if (target && enabled) 
         {
             if (clicked)
             {

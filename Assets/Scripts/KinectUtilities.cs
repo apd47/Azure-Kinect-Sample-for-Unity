@@ -6,6 +6,7 @@ using System.IO.Compression;
 using UnityEngine;
 using Microsoft.Azure.Kinect.Sensor;
 using System.Text;
+using K4os.Compression.LZ4;
 
 public class KinectUtilities
 {
@@ -221,10 +222,35 @@ public class KinectSource
 
 public class KinectFrame
 {
+    public KinectSource source;
     public int frameNumber;
     public byte[] compressedData;
     public byte[] decompressedData;
     public KinectFrameState frameState;
+
+    public void DecompressLZ4()
+    {
+        //Debug.Log(frameNumber +" | " + frameState);
+        if (frameState == KinectFrameState.Compressed)
+        {
+            frameState = KinectFrameState.ProcessingDecompression;
+            try
+            {
+                Vector3Int matrix = source.matrixSize;
+                decompressedData = new byte[matrix.x * matrix.y * matrix.z * 4 * 4];
+                LZ4Codec.Decode(compressedData, 0, compressedData.Length, decompressedData, 0, decompressedData.Length);
+                frameState = KinectFrameState.Decompressed;
+                //Debug.Log(frameNumber + " | " + frameState);
+                compressedData = null;
+
+            }
+            catch (Exception exception)
+            {
+                frameState = KinectFrameState.Error;
+                Debug.Log(exception.ToString());
+            }
+        }
+    }
 
     public void Decompress()
     {
@@ -260,7 +286,6 @@ public class KinectFrame
 
 public class KinectSocketFrame : KinectFrame
 {
-    public KinectRemoteProvider source;
     public int populatedSegments;
     public int totalSegments;
     public string[] segments;
@@ -304,11 +329,9 @@ public class KinectSocketFrame : KinectFrame
 
 public class KinectVolumeFrame : KinectFrame
 {
-    public KinectLocalFile sourceFile;
-
     public KinectVolumeFrame(KinectLocalFile sourceFile, int frameNumber)
     {
-        this.sourceFile = sourceFile;
+        this.source = sourceFile;
         this.frameNumber = frameNumber;
         this.compressedData = Convert.FromBase64String(sourceFile.compressedFrames[frameNumber]);
         frameState = KinectFrameState.Compressed;

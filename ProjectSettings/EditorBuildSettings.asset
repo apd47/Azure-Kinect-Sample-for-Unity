@@ -14,4 +14,7 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Reciever.unity
     guid: 2cc0649d1f81daf4f8599aefd4cfd74b
+  - enabled: 0
+    path: Assets/Scenes/Local Playback.unity
+    guid: 1b453bb662f546f4291fe709db7efc74
   m_configObjects: {}

@@ -27,29 +27,21 @@ public class KinectPlayback : MonoBehaviour
     {
         if (source != null)
         {
-            if (CheckAndMaintainBuffer(defaultSecondsToBuffer) != 0)
+
+            ThreadPool.QueueUserWorkItem((state) => CheckAndMaintainBuffer((float)state), defaultSecondsToBuffer);
+
+            if (Time.time - lastFrameTime >= frameDuration)
             {
-                if (strictBuffering && Time.time - lastFrameTime >= frameDuration)
+                if (ApplyNextFrame(targetMesh, volume))
                 {
-                    print("Strict buffering is delaying frame playback");
+                    print("Frame Loaded");
                     lastFrameTime = Time.time;
                 }
-            }
-            else
-            {
-                if (Time.time - lastFrameTime >= frameDuration)
+                else
                 {
-                    if (ApplyNextFrame(targetMesh, volume))
-                    {
-                        print("Frame Loaded");
-                        lastFrameTime = Time.time;
-                    }
-                    else
-                    {
-                        print("BUFFER FAILURE: Current frame not yet decompressed -  increasing buffer depth and pausing for defaultSecondsToBuffer");
-                        defaultSecondsToBuffer = defaultSecondsToBuffer + 0.2f;
-                        lastFrameTime = Time.time + defaultSecondsToBuffer;
-                    }
+                    print("BUFFER FAILURE: Current frame not yet decompressed -  increasing buffer depth and pausing for defaultSecondsToBuffer");
+                    defaultSecondsToBuffer = defaultSecondsToBuffer + 0.2f;
+                    lastFrameTime = Time.time + defaultSecondsToBuffer;
                 }
             }
         }
@@ -68,10 +60,13 @@ public class KinectPlayback : MonoBehaviour
         targetMesh.transform.localPosition = new Vector3(0, 0, worldscaleDepth / 2);
 
         if (source.configuration.transformationMode == TransformationMode.DepthToColor)
-            targetMesh.transform.localScale = new Vector3(1.6f * worldscaleDepth / 3, 0.9f * worldscaleDepth / 3, worldscaleDepth);
+            targetMesh.transform.localScale = new Vector3(1.6f * worldscaleDepth, 0.9f * worldscaleDepth, worldscaleDepth);
         if (source.configuration.transformationMode == TransformationMode.ColorToDepth)
-            targetMesh.transform.localScale = new Vector3(worldscaleDepth / 3, worldscaleDepth / 3, worldscaleDepth);
+            targetMesh.transform.localScale = new Vector3(worldscaleDepth, worldscaleDepth, worldscaleDepth);
     }
+
+    int droppedFrames;
+    int errorFrames;
 
     public bool ApplyNextFrame(MeshRenderer targetMesh, ComputeBuffer targetBuffer)
     {
@@ -79,29 +74,37 @@ public class KinectPlayback : MonoBehaviour
             return false;
 
         KinectFrame currentFrame = source.frames.First.Value;
-        if (currentFrame.frameState == KinectFrameState.Decompressed)
-        {
-            print(currentFrame.frameNumber);
-            Material matt = targetMesh.material;
-            targetBuffer.SetData(currentFrame.decompressedData);
-            source.frames.RemoveFirst();
-            matt.SetBuffer("colors", targetBuffer);
-            matt.SetInt("_MatrixX", source.matrixSize.x);
-            matt.SetInt("_MatrixY", source.matrixSize.y);
-            matt.SetInt("_MatrixZ", source.matrixSize.z);
-            return true;
+
+        switch (currentFrame.frameState) {
+            case KinectFrameState.Decompressed:
+                Material matt = targetMesh.material;
+                targetBuffer.SetData(currentFrame.decompressedData);
+                source.frames.RemoveFirst();
+                matt.SetBuffer("colors", targetBuffer);
+                matt.SetInt("_MatrixX", source.matrixSize.x);
+                matt.SetInt("_MatrixY", source.matrixSize.y);
+                matt.SetInt("_MatrixZ", source.matrixSize.z);
+                return true;
+            case KinectFrameState.PartiallyPopulated:
+                droppedFrames++;
+                print("Discarding partial frame " + currentFrame.frameNumber + " ( " + droppedFrames + " total dropped frames)");
+                source.frames.RemoveFirst();
+                return false;
+            case KinectFrameState.Error:
+                errorFrames++;
+                print("Discarding error frame " + currentFrame.frameNumber + " ( " + errorFrames + " total error frames)");
+                source.frames.RemoveFirst();
+                return false;
+            default:
+                return false;
         }
-        else
-        {
-            return false;
-        }
+
 
     }
 
     public int CheckAndMaintainBuffer(float secondsToBuffer)
     {
         LinkedListNode<KinectFrame> currentFrame = source.frames.First;
-
         int futureToCheck = (int)(secondsToBuffer / frameDuration);
         int notBuffered = 0;
 
@@ -109,11 +112,20 @@ public class KinectPlayback : MonoBehaviour
         {
             if (currentFrame != null)
             {
-                if (currentFrame.Value.frameState != KinectFrameState.Decompressed)
+                switch (currentFrame.Value.frameState)
                 {
-                    notBuffered++;
-                    //currentFrame.Value.Decompress();
-                    new Thread(() => currentFrame.Value.Decompress()).Start();
+                    case KinectFrameState.Decompressed:
+                        break;
+                    case KinectFrameState.Error:
+                        source.frames.Remove(currentFrame);
+                        return -1;
+                    case KinectFrameState.Compressed:     
+                        notBuffered++;
+                        currentFrame.Value.DecompressLZ4();
+                        break;
+                    case KinectFrameState.Empty:
+                        notBuffered++;
+                        break;
                 }
                 currentFrame = currentFrame.Next;
             }

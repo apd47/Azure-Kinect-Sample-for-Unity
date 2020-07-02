@@ -27,7 +27,7 @@ public class KinectLocalPlayback : KinectPlayback
     {
         source = new KinectLocalFile(filepath, kinectSettings);
         ConfigureVisualization();
-        CheckAndMaintainBuffer(defaultSecondsToBuffer);
+        ThreadPool.QueueUserWorkItem((state) => CheckAndMaintainBuffer((float)state), defaultSecondsToBuffer);
     }
 
 }

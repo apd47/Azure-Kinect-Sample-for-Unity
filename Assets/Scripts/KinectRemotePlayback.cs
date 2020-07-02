@@ -18,8 +18,6 @@ public class KinectRemotePlayback : KinectPlayback
 {
     public float MaxWaitSeconds = 1;
 
-    public bool clearUsedFrames = false;
-
     public string clientName;
     public string providerName;
     public string serverHostname;
@@ -51,7 +49,7 @@ public class KinectRemotePlayback : KinectPlayback
                     if (strictBuffering && Time.time - lastFrameTime >= frameDuration)
                     {
                         print("Strict buffering is delaying frame playback");
-                        lastFrameTime = Time.time;
+                        lastFrameTime = Time.time + defaultSecondsToBuffer;
                         return;
                     }
                 }
@@ -64,9 +62,8 @@ public class KinectRemotePlayback : KinectPlayback
                     }
                     else
                     {
-                        print("BUFFER FAILURE: Current frame not yet decompressed -  increasing buffer depth and pausing for defaultSecondsToBuffer");
-                        defaultSecondsToBuffer = defaultSecondsToBuffer + 0.2f;
-                        lastFrameTime = Time.time + defaultSecondsToBuffer;
+                        print("NO FRAMES READY - consider increasing the buffer depth");
+                        lastFrameTime = Time.time;
                     }
                 }
             }
