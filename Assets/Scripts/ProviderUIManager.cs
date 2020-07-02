@@ -10,12 +10,14 @@ public class ProviderUIManager : MonoBehaviour
     public InputField hostname;
     public InputField port;
     public InputField providername;
+    public InputField maxPacketSize;
 
     private void Update()
     {
         buffer.serverHostname = hostname.text;
         buffer.serverPort = int.Parse(port.text);
         buffer.providerName = providername.text;
+        buffer.maxPacketBytes = int.Parse(maxPacketSize.text);
     }
 
 }

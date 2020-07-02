@@ -9,119 +9,24 @@ using UnityEngine;
 using UnityEngine.Events;
 
 [System.Serializable]
-public class KinectRemoteFile
+public class KinectRemoteProvider : KinectSource
 {
     public string serverHostname;
     public int serverPort;
     public string providerName;
     public string clientName;
-    public LinkedList<KinectSocketFrame> frames;
-    public KinectConfiguration configuration;
-    public Vector3Int matrixSize;
-
+    public ConnectionState connectionState = ConnectionState.Disconnected;
 
     ClientRole clientRole = ClientRole.RECEIVER;
     IPEndPoint serverEndpoint;
     Socket serverSocket;
 
-    public enum ClientRole
-    {
-        PROVIDER,
-        RECEIVER
-    }
-
-    public int playbackFPS
-    {
-        get
-        {
-            switch (configuration.fps)
-            {
-                case FPS.FPS5:
-                    return 5;
-                case FPS.FPS15:
-                    return 15;
-                case FPS.FPS30:
-                    return 30;
-                default:
-                    return 15;
-            }
-
-        }
-    }
-
-    public KinectRemoteFile(string hostname, int port, KinectConfiguration overrideConfiguration)
+    public KinectRemoteProvider(string hostname, int port, KinectConfiguration overrideConfiguration)
     {
         this.serverHostname = hostname;
         this.serverPort = port;
         this.configuration = overrideConfiguration;
-        this.matrixSize = CalculateMatrixSize();
-        this.frames = new LinkedList<KinectSocketFrame>();
-    }
-
-    public Vector3Int CalculateMatrixSize()
-    {
-        Vector2Int resolution = new Vector2Int(0, 0);
-        switch (configuration.transformationMode)
-        {
-            case TransformationMode.ColorToDepth:
-                switch (configuration.depthMode)
-                {
-                    case DepthMode.Off:
-                        resolution = new Vector2Int(-1, -1);
-                        break;
-                    case DepthMode.NFOV_2x2Binned:
-                        resolution = new Vector2Int(320, 288);
-                        break;
-                    case DepthMode.NFOV_Unbinned:
-                        resolution = new Vector2Int(640, 576);
-                        break;
-                    case DepthMode.WFOV_2x2Binned:
-                        resolution = new Vector2Int(512, 512);
-                        break;
-                    case DepthMode.WFOV_Unbinned:
-                        resolution = new Vector2Int(1024, 1024);
-                        break;
-                    case DepthMode.PassiveIR:
-                        resolution = new Vector2Int(1024, 1024);
-                        break;
-                    default:
-                        break;
-                }
-                break;
-            case TransformationMode.DepthToColor:
-                switch (configuration.colorResolution)
-                {
-                    case ColorResolution.Off:
-                        resolution = new Vector2Int(-1, -1);
-                        break;
-                    case ColorResolution.R720p:
-                        resolution = new Vector2Int(1280, 720);
-                        break;
-                    case ColorResolution.R1080p:
-                        resolution = new Vector2Int(1920, 1080);
-                        break;
-                    case ColorResolution.R1440p:
-                        resolution = new Vector2Int(2560, 1440);
-                        break;
-                    case ColorResolution.R1536p:
-                        resolution = new Vector2Int(2048, 1536);
-                        break;
-                    case ColorResolution.R2160p:
-                        resolution = new Vector2Int(3840, 2160);
-                        break;
-                    case ColorResolution.R3072p:
-                        resolution = new Vector2Int(4096, 3072);
-                        break;
-                    default:
-                        break;
-                }
-                break;
-            case TransformationMode.None:
-                Debug.Log("Transformation Mode Invalid - select either DepthToColor or ColorToDepth");
-                break;
-        }
-        matrixSize = new Vector3Int((int)(resolution.x * configuration.volumeScale.x), (int)(resolution.y * configuration.volumeScale.y), (int)((KinectUtilities.depthRanges[(int)configuration.depthMode].y - KinectUtilities.depthRanges[(int)configuration.depthMode].x) / 11 * configuration.volumeScale.z));
-        return matrixSize;
+        this.frames = new LinkedList<KinectFrame>();
     }
 
     public void JoinServer(string clientName)
@@ -224,14 +129,6 @@ public class KinectRemoteFile
             //Debug.Log("Nothing recieved");
         }
     }
-    public enum ConnectionState
-    {
-        Disconnected,
-        JoinedServer,
-        SubscribedToProvider
-    }
-
-    public ConnectionState connectionState = ConnectionState.Disconnected;
 
     private void OnDataRecieved(object sender, SocketAsyncEventArgs e)
     {
@@ -308,21 +205,22 @@ public class KinectRemoteFile
                         int totalSegments = int.Parse(split[4]);
                         int segmentNumber = int.Parse(split[5]);
                         string segmentString = split[6];
-                        // TODO: If data comes in a VERY unordered fashion, this wont work correctly because it only checks the most recent 2 frames
-                        if (frames.Last.Value.frameNumber == int.Parse(split[3]))
+                        bool foundInList = false;
+                        foreach (KinectSocketFrame frame in frames)
                         {
-                            frames.Last.Value.ImportSegment(segmentNumber, segmentString);
+                            if (frame.frameNumber == frameNumber)
+                            {
+                                frame.ImportSegment(segmentNumber, segmentString);
+                                foundInList = true;
+                            }
                         }
-                        else if (frames.Last.Previous.Value.frameNumber == int.Parse(split[3]))
-                        {
-                            frames.Last.Previous.Value.ImportSegment(segmentNumber, segmentString);
-                        }
-                        else
+                        if (!foundInList)
                         {
                             KinectSocketFrame temp = new KinectSocketFrame(this, frameNumber, totalSegments);
                             temp.ImportSegment(segmentNumber, segmentString);
                             frames.AddLast(temp);
                         }
+
                         break;
                     default:
                         Debug.Log(split[1]);
