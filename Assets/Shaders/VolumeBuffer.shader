@@ -6,16 +6,15 @@
 		_Intensity("Intensity", Range(1.0, 5.0)) = 1.2
 		_BlackCutoff("Black Cutoff", Range(0.0,1.0)) = 0.02
 		_RaymarchAlpha("Raymarch Alpha", Range(0.0,1.0)) = 0.5
-		_MaxSteps("Max Steps", Range(0,2048)) = 64
+		_StepRatio("Step Ratio", Range(0,3)) = 2
 		_MatrixX("Matrix X", Range(0,512)) = 64
 		_MatrixY("Matrix Y", Range(0,512)) = 64
 		_MatrixZ("Matrix Z", Range(0,512)) = 64
 	}
 
 		CGINCLUDE
-		half _Intensity, _Threshold, _BlackCutoff, _RaymarchAlpha;
-		half _MaxSteps;
-		float _StepSize;
+			half _Intensity, _Threshold, _BlackCutoff, _RaymarchAlpha;
+		half _StepRatio;
 		int _MatrixX, _MatrixY, _MatrixZ;
 		uniform StructuredBuffer<float4> colors;
 
@@ -45,11 +44,6 @@
 
 		half3 localize(half3 p) {
 			return mul(unity_WorldToObject, half4(p, 1)).xyz;
-		}
-
-		half3 get_uv(half3 p) {
-			// half3 local = localize(p);
-			return (p + 0.5);
 		}
 
 		bool outside(half3 uv) {
@@ -131,29 +125,29 @@
 						tnear = max(0.0, tnear);
 
 						// half3 start = ray.origin + ray.dir * tnear;
-						half3 start = ray.origin;
-						half3 end = ray.origin + ray.dir * tfar;
-						half dist = abs(tfar - tnear); // half dist = distance(start, end);
-						half step_size = dist / half(_MaxSteps);
-						half3 ds = normalize(end - start) * step_size;
+						half _MaxSteps = (_MatrixX + _MatrixY + _MatrixZ) / _StepRatio;
+						half step_size = abs(tfar - tnear) / _MaxSteps;
+						half3 ds = normalize(ray.origin + ray.dir * tfar - ray.origin) * step_size;
+						if (length(ds) == 0) {
+							return 0;
+						}
 						half voxelAlpha = 0;
 						half4 volumeValue = 0;
 
 						half4 finalColor = half4(0, 0, 0, 0);
-						half3 p = end;
+						half3 p = ray.origin + ray.dir * tfar;
+						half3 uv = 0;
+						int index = 0;
 
 						for (int iter = 0; iter < _MaxSteps; iter++) {
-							half3 uv = get_uv(p);
-							int index = round((_MatrixZ - 1)*uv.z)*_MatrixX*_MatrixY + round((_MatrixX - 1)*uv.x)*_MatrixY + round((_MatrixY - 1)*uv.y);
+							uv = p + 0.5;
+							index = round((_MatrixZ - 1) * uv.z) * _MatrixX * _MatrixY + round((_MatrixX - 1) * uv.x) * _MatrixY + round((_MatrixY - 1) * uv.y);
 							volumeValue = colors[index] * _Intensity;
-							if (length(volumeValue) > _BlackCutoff) {
-								voxelAlpha = _RaymarchAlpha * volumeValue.a;
-								finalColor = finalColor * (1.0f - voxelAlpha) + (volumeValue.rgba * voxelAlpha);
-							}
+							voxelAlpha = _RaymarchAlpha * volumeValue.a;
+							finalColor = finalColor * (1.0f - voxelAlpha) + (volumeValue.rgba * voxelAlpha);
 							p -= ds;
 						}
-
-						if (length(ds) == 0 || length(finalColor) < _BlackCutoff) {
+						if (length(finalColor) < _BlackCutoff) {
 							return 0;
 						}
 

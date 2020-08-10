@@ -34,11 +34,24 @@ public enum ConnectionState
     SubscribedToProvider
 }
 
+public enum FrameType {
+    Volume, 
+    Color,
+    Depth
+}
+
+
 public enum TransformationMode
 {
     ColorToDepth,
     DepthToColor,
     None
+}
+
+public enum TransmissionMode
+{
+    TCP, 
+    UDP
 }
 
 [System.Serializable]

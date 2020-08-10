@@ -49,12 +49,23 @@ public class KinectBuffer : MonoBehaviour
 
     [Header("Networking")]
     public bool sendToServer;
+    public TransmissionMode transmissionMode;
     public string providerName;
     public string serverHostname;
+<<<<<<< Updated upstream
     public int serverPort;
+=======
+    public int udpPort = 1935;
+    public int tcpPort = 1936;
+
+    public int maxPacketBytes = 1024;
+>>>>>>> Stashed changes
     ConnectionState connectionState = ConnectionState.Disconnected;
     IPEndPoint serverEndpoint;
     Socket serverSocket;
+    private static ManualResetEvent connectDone = new ManualResetEvent(false);
+    private static ManualResetEvent sendDone = new ManualResetEvent(false);
+    private static ManualResetEvent receiveDone = new ManualResetEvent(true);
 
     [Header("IMU Settings")]
     public bool collectIMUData;
@@ -82,9 +93,8 @@ public class KinectBuffer : MonoBehaviour
         ListenForData(serverSocket);
     }
 
-    private void OnDestroy()
+    private void OnCloseKinect()
     {
-        running = false;
         if (volumeBuffer != null)
         {
             volumeBuffer.Release();
@@ -105,11 +115,23 @@ public class KinectBuffer : MonoBehaviour
         if (oldDepthTexture != null)
             Destroy(oldDepthTexture);
 
+    }
+
+    private void OnCloseSockets()
+    {
+
         if (connectionState != ConnectionState.Disconnected)
         {
             LeaveServer(providerName, ClientRole.PROVIDER);
             serverSocket.Close();
         }
+    }
+
+    private void OnDestroy()
+    {
+        running = false;
+        OnCloseKinect();
+        OnCloseSockets();
     }
 
     #endregion
@@ -118,7 +140,10 @@ public class KinectBuffer : MonoBehaviour
 
     void StartKinect()
     {
-        OnDestroy();
+        if (running)
+        {
+            OnCloseKinect();
+        }
         device = Device.Open(deviceID);
         device.StartCameras(new DeviceConfiguration
         {
@@ -142,6 +167,16 @@ public class KinectBuffer : MonoBehaviour
             mesh.transform.localScale = new Vector3(worldscaleDepth*2, worldscaleDepth*2, worldscaleDepth);
 
         running = true;
+<<<<<<< Updated upstream
+=======
+        Task CameraLooper = CameraLoop(device);
+    }
+
+    public void StopKinect()
+    {
+        running = false;
+        OnCloseKinect();
+>>>>>>> Stashed changes
     }
 
     private async Task CameraLoop(Device device)
@@ -172,6 +207,7 @@ public class KinectBuffer : MonoBehaviour
                     if (volumeBuffer == null)
                     {
                         matrixSize = new Vector3Int((int)(finalColor.WidthPixels * kinectSettings.volumeScale.x), (int)(finalColor.HeightPixels * kinectSettings.volumeScale.y), (int)((KinectUtilities.depthRanges[(int)device.CurrentDepthMode].y - KinectUtilities.depthRanges[(int)device.CurrentDepthMode].x) / 11 * kinectSettings.volumeScale.z));
+                        print(matrixSize);
                         volumeBuffer = new ComputeBuffer(matrixSize.x * matrixSize.y * matrixSize.z, 4 * sizeof(float), ComputeBufferType.Default);
                         print("Made Volume Buffer || Matrix Size: " + matrixSize);
                     }
@@ -276,6 +312,10 @@ public class KinectBuffer : MonoBehaviour
             {
                 if (connectionState == ConnectionState.JoinedServer)
                 {
+<<<<<<< Updated upstream
+=======
+                    //SplitAndSend(maxPacketBytes, thisFrameID, Convert.ToBase64String(compressedArray));
+>>>>>>> Stashed changes
                     SendFrameToServer(thisFrameID, Convert.ToBase64String(compressedArray));
                 }
             }
@@ -398,17 +438,99 @@ public class KinectBuffer : MonoBehaviour
 
     private void ListenForData(Socket socket)
     {
-        if (socket != null)
+        if (socket != null && receiveDone.WaitOne(0))
         {
-            int available = socket.Available;
-            if (available > 0)
+            Receive(socket);
+            //int available = socket.Available;
+            //if (available > 0)
+            //{
+            //    SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+            //    args.SetBuffer(new byte[available], 0, available);
+            //    args.Completed += OnDataRecieved;
+            //    socket.ReceiveAsync(args);
+            //}
+        }
+    }
+
+    public class StateObject
+    {
+        // Client socket.  
+        public Socket workSocket = null;
+        // Size of receive buffer.  
+        public const int BufferSize = 256;
+        public int Available;
+        // Receive buffer.  
+        public byte[] buffer = new byte[BufferSize];
+        // Received data string.  
+        public StringBuilder sb = new StringBuilder();
+    }
+
+    private void Receive(Socket client)
+    {
+        try
+        {
+            receiveDone.Reset();
+            StateObject state = new StateObject();
+            state.workSocket = client;
+            client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                new AsyncCallback(ReceiveCallback), state);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e.ToString());
+        }
+    }
+
+    private void ReceiveCallback(IAsyncResult ar)
+    {
+        try
+        { 
+            StateObject state = (StateObject)ar.AsyncState;
+            Socket client = state.workSocket;
+
+            int bytesRead = client.EndReceive(ar);
+            if (bytesRead > 0)
             {
+                // There might be more data, so store the data received so far.  
+                state.sb.Append(Encoding.ASCII.GetString(state.buffer, 0, bytesRead));
+
+                // Get the rest of the data.
+                if (client.Available > 0)
+                {  
+                    client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                        new AsyncCallback(ReceiveCallback), state);
+                }
+                else
+                {
+                    // All the data has arrived
+                    if (state.sb.Length > 1)
+                    {
+                        receiveDone.Set();
+                        ProcessReceivedData(state.sb.ToString());
+                    }
+                }
+            }
+            else
+            {
+<<<<<<< Updated upstream
                 print("Available:" + available);
                 SocketAsyncEventArgs args = new SocketAsyncEventArgs();
                 args.SetBuffer(new byte[available], 0, available);
                 args.Completed += OnDataRecieved;
                 socket.ReceiveAsync(args);
+=======
+                // All the data has arrived
+                if (state.sb.Length > 1)
+                {
+                    receiveDone.Set();
+                    ProcessReceivedData(state.sb.ToString());
+                }
+>>>>>>> Stashed changes
             }
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e.ToString());
         }
     }
 
@@ -439,25 +561,101 @@ public class KinectBuffer : MonoBehaviour
         {
             if (string.IsNullOrEmpty(serverHostname))
             {
-                print("Please specify UDP server !");
+                print("Please specify server hostname !");
                 return;
             }
 
             var addresses = Dns.GetHostAddresses(serverHostname);
-            serverEndpoint = new IPEndPoint(addresses[0], serverPort);
 
-            serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            serverSocket.Bind(new IPEndPoint(IPAddress.Any, 0));
+            switch (transmissionMode)
+            {
+                case TransmissionMode.UDP:
+                    serverEndpoint = new IPEndPoint(addresses[0], udpPort);
+                    serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                    serverSocket.Bind(new IPEndPoint(IPAddress.Any, 0));
+                    break;
+                case TransmissionMode.TCP:
+                    serverEndpoint = new IPEndPoint(addresses[0], tcpPort);
+                    serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                    serverSocket.BeginConnect(serverEndpoint, new AsyncCallback(ConnectCallback), serverSocket);
+                    if (!connectDone.WaitOne(5000)) // 5 second connection timeout
+                    {
+                        print("Wasn't able to connect to server before timeout.");
+                        serverSocket = null;
+                    }
+                    break;
+            }
 
+<<<<<<< Updated upstream
             // TODO: Make this a string builder, and not a either/or switch
             string message = "JOIN" + "|" + clientRole + "|" + clientName + "|" + kinectSettings.Serialize();
             byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
             serverSocket.SendTo(data, serverEndpoint);
             print("Server JOIN request sent");
+=======
+            if (serverSocket != null)
+            {
+                // TODO: Make this a string builder, and not a either/or switch
+                string message = "JOIN" + "|" + clientRole + "|" + clientName + "|" + kinectSettings.Serialized;
+                Send(serverSocket, message);
+                print("Server JOIN request sent");
+            }
+>>>>>>> Stashed changes
         }
         catch (Exception x)
         {
             print("Error: " + x.ToString());
+        }
+    }
+    
+    // Uses UTF8 Encoding not ASCII
+    private void Send(Socket client, String message)
+    {
+        byte[] byteData = Encoding.UTF8.GetBytes(message);
+
+        switch (transmissionMode)
+        {
+            case TransmissionMode.UDP:
+                serverSocket.SendTo(byteData, serverEndpoint);
+                break;
+            case TransmissionMode.TCP:
+                client.BeginSend(byteData, 0, byteData.Length, 0, new AsyncCallback(SendCallback), client);
+                sendDone.WaitOne();
+                break;
+        }
+    }
+
+    private void ConnectCallback(IAsyncResult ar)
+    {
+        try
+        {
+            Socket client = (Socket)ar.AsyncState;
+            client.EndConnect(ar);
+            Console.WriteLine("Socket connected to {0}",
+                client.RemoteEndPoint.ToString());
+            connectDone.Set();
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e.ToString());
+        }
+    }
+
+
+    private void SendCallback(IAsyncResult ar)
+    {
+        try
+        {
+            Socket client = (Socket)ar.AsyncState;
+            int bytesSent = client.EndSend(ar);
+            Console.WriteLine("Sent {0} bytes to server.", bytesSent);
+
+            // Signal that all bytes have been sent.  
+            sendDone.Set();
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e.ToString());
         }
     }
 
@@ -468,8 +666,7 @@ public class KinectBuffer : MonoBehaviour
         {
             // TODO: Make this a string builder, and not a either/or switch
             string message = "LEAVE" + "|" + clientRole + "|" + clientName;
-            byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
-            serverSocket.SendTo(data, serverEndpoint);
+            Send(serverSocket, message);
             print("Server LEAVE request sent");
         }
         catch (Exception x)
@@ -478,10 +675,8 @@ public class KinectBuffer : MonoBehaviour
         }
     }
 
-    private void OnDataRecieved(object sender, SocketAsyncEventArgs e)
+    private void ProcessReceivedData(string recieved)
     {
-        string recieved = Encoding.ASCII.GetString(e.Buffer);
-        //print("Recieved: " + recieved);
         string[] split = recieved.Split('|');
         switch (split[0])
         {
@@ -536,6 +731,12 @@ public class KinectBuffer : MonoBehaviour
         }
     }
 
+    private void OnDataReceived(object sender, SocketAsyncEventArgs e)
+    {
+        string received = Encoding.ASCII.GetString(e.Buffer);
+        ProcessReceivedData(received);
+    }
+
     void SendFrameToServer(int frameNumber, string frameData)
     {
         if (connectionState == ConnectionState.JoinedServer)
@@ -543,8 +744,12 @@ public class KinectBuffer : MonoBehaviour
             try
             {
                 string message = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + frameData;
+<<<<<<< Updated upstream
                 byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
                 serverSocket.SendTo(data, serverEndpoint);
+=======
+                Send(serverSocket, message);
+>>>>>>> Stashed changes
                 //print("Frame " + frameNumber + " sent to server");
             }
             catch (Exception x)
@@ -554,6 +759,42 @@ public class KinectBuffer : MonoBehaviour
         }
     }
 
+<<<<<<< Updated upstream
+=======
+    public void SplitAndSend(int maxBytesPerMessage, int frameNumber, string frameData)
+    {
+        //print(frameData.Length);
+        List<string> segments = new List<string>();
+
+        int numberOfSegments = 0;
+        int availableBytesPerMessage = maxBytesPerMessage - 50; // Subtract 50 extra for the header
+
+        for (int i = 0; i < frameData.Length;)
+        {
+            if ((frameData.Length - i - 1) > availableBytesPerMessage)
+            {
+                segments.Add(frameData.Substring(i, availableBytesPerMessage));
+                i += availableBytesPerMessage;
+                numberOfSegments++;
+            }
+            else
+            {
+                segments.Add(frameData.Substring(i, frameData.Length - i));
+                i += availableBytesPerMessage;
+                numberOfSegments++;
+            }
+        }
+        print(segments.Count);
+        string messageHeader = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + numberOfSegments + "|";
+
+        for (int s = 0; s < segments.Count; s++)
+        {
+            string message = messageHeader + s + "|" + segments[s];
+            Send(serverSocket, message);
+        }
+    }
+
+>>>>>>> Stashed changes
     #endregion
 
     #region IMU
