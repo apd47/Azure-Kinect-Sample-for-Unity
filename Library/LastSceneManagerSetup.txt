@@ -1,9 +1,13 @@
 sceneSetups:
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 - path: Assets/Scenes/Playback.unity
 =======
 - path: Assets/Scenes/Reciever.unity
+>>>>>>> Stashed changes
+=======
+- path: Assets/Scenes/Provider 2D.unity
 >>>>>>> Stashed changes
 =======
 - path: Assets/Scenes/Provider 2D.unity

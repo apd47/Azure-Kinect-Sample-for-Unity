@@ -17,10 +17,15 @@ using UnityEngine.UIElements;
 public class KinectRemotePlayback : MonoBehaviour
 {
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
     public float defaultSecondsToBuffer = 3;
     public bool clearUsedFrames = false;
     public bool strictBuffering = false;
 
+=======
+    public float MaxWaitSeconds = 1;
+    public TransmissionMode transmissionMode;
+>>>>>>> Stashed changes
 =======
     public float MaxWaitSeconds = 1;
     public TransmissionMode transmissionMode;
@@ -187,9 +192,12 @@ public class KinectRemotePlayback : MonoBehaviour
     public void Join()
     {
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
         server = new KinectRemoteFile(serverHostname, serverPort, kinectSettings);
         server.JoinServer(clientName);
 =======
+=======
+>>>>>>> Stashed changes
         source = new KinectRemoteProvider(serverHostname, transmissionMode, kinectSettings);
         (source as KinectRemoteProvider).JoinServer(clientName);
 >>>>>>> Stashed changes

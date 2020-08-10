@@ -53,8 +53,11 @@ public class KinectBuffer : MonoBehaviour
     public string providerName;
     public string serverHostname;
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
     public int serverPort;
 =======
+=======
+>>>>>>> Stashed changes
     public int udpPort = 1935;
     public int tcpPort = 1936;
 
@@ -176,6 +179,9 @@ public class KinectBuffer : MonoBehaviour
     {
         running = false;
         OnCloseKinect();
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
     }
 
@@ -313,6 +319,10 @@ public class KinectBuffer : MonoBehaviour
                 if (connectionState == ConnectionState.JoinedServer)
                 {
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
+=======
+                    //SplitAndSend(maxPacketBytes, thisFrameID, Convert.ToBase64String(compressedArray));
+>>>>>>> Stashed changes
 =======
                     //SplitAndSend(maxPacketBytes, thisFrameID, Convert.ToBase64String(compressedArray));
 >>>>>>> Stashed changes
@@ -490,6 +500,7 @@ public class KinectBuffer : MonoBehaviour
 
             int bytesRead = client.EndReceive(ar);
             if (bytesRead > 0)
+<<<<<<< Updated upstream
             {
                 // There might be more data, so store the data received so far.  
                 state.sb.Append(Encoding.ASCII.GetString(state.buffer, 0, bytesRead));
@@ -519,12 +530,39 @@ public class KinectBuffer : MonoBehaviour
                 args.Completed += OnDataRecieved;
                 socket.ReceiveAsync(args);
 =======
+=======
+            {
+                // There might be more data, so store the data received so far.  
+                state.sb.Append(Encoding.ASCII.GetString(state.buffer, 0, bytesRead));
+
+                // Get the rest of the data.
+                if (client.Available > 0)
+                {  
+                    client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                        new AsyncCallback(ReceiveCallback), state);
+                }
+                else
+                {
+                    // All the data has arrived
+                    if (state.sb.Length > 1)
+                    {
+                        receiveDone.Set();
+                        ProcessReceivedData(state.sb.ToString());
+                    }
+                }
+            }
+            else
+            {
+>>>>>>> Stashed changes
                 // All the data has arrived
                 if (state.sb.Length > 1)
                 {
                     receiveDone.Set();
                     ProcessReceivedData(state.sb.ToString());
                 }
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
             }
         }
@@ -587,12 +625,15 @@ public class KinectBuffer : MonoBehaviour
             }
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
             // TODO: Make this a string builder, and not a either/or switch
             string message = "JOIN" + "|" + clientRole + "|" + clientName + "|" + kinectSettings.Serialize();
             byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
             serverSocket.SendTo(data, serverEndpoint);
             print("Server JOIN request sent");
 =======
+=======
+>>>>>>> Stashed changes
             if (serverSocket != null)
             {
                 // TODO: Make this a string builder, and not a either/or switch
@@ -600,6 +641,9 @@ public class KinectBuffer : MonoBehaviour
                 Send(serverSocket, message);
                 print("Server JOIN request sent");
             }
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
         }
         catch (Exception x)
@@ -745,8 +789,12 @@ public class KinectBuffer : MonoBehaviour
             {
                 string message = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + frameData;
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
                 byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
                 serverSocket.SendTo(data, serverEndpoint);
+=======
+                Send(serverSocket, message);
+>>>>>>> Stashed changes
 =======
                 Send(serverSocket, message);
 >>>>>>> Stashed changes
