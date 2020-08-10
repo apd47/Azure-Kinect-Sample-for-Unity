@@ -10,6 +10,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using System.Collections.Generic;
+using System.Data.SqlTypes;
+using K4os.Compression.LZ4;
 
 public class KinectBuffer : MonoBehaviour
 {
@@ -29,6 +31,8 @@ public class KinectBuffer : MonoBehaviour
     int frameID = 0;
     int computeShaderKernelIndex = -1;
     ComputeBuffer volumeBuffer;
+    float[] extractedVolumeBuffer;
+    byte[] extractedVolumeBytes;
     Image finalColor;
     byte[] colorData;
     Image finalDepth;
@@ -41,10 +45,16 @@ public class KinectBuffer : MonoBehaviour
     public MeshRenderer mesh;
 
     [Header("Recording")]
-    public bool saveToFile;
     public string filepath;
-    public int numberFramesToRecord;
-    public bool triggerWriteToFile;
+    public int maxFileSizeMb = 500;
+    public bool startRecording;
+    public bool pauseRecording;
+    public bool stopRecording;
+    bool saveToFile;
+    bool triggerWriteToFile;
+    int compressedBytes = 0;
+    int maxRecordingSeconds;
+    int savedFrameCount;
     string[] base64Frames;
 
     [Header("Networking")]
@@ -52,6 +62,7 @@ public class KinectBuffer : MonoBehaviour
     public string providerName;
     public string serverHostname;
     public int serverPort;
+    public int maxPacketBytes = 1024;
     ConnectionState connectionState = ConnectionState.Disconnected;
     IPEndPoint serverEndpoint;
     Socket serverSocket;
@@ -68,18 +79,27 @@ public class KinectBuffer : MonoBehaviour
 
     #region Unity
 
-    private void Start()
-    {
-        StartKinect();
-        Task CameraLooper = CameraLoop(device);
-        Task IMULooper = IMULoop(device);
-        //Task NetworkingLooper = NetworkingLoop();
-        Task SavingLooper = SavingLoop();
-    }
 
     private void Update()
     {
         ListenForData(serverSocket);
+        SavingLoop();
+
+        if (startRecording)
+        {
+            StartRecording();
+            startRecording = false;
+        }
+        if (pauseRecording)
+        {
+            PauseRecording();
+            pauseRecording = false;
+        }
+        if (stopRecording)
+        {
+            StopRecording();
+            stopRecording = false;
+        }
     }
 
     private void OnDestroy()
@@ -116,7 +136,7 @@ public class KinectBuffer : MonoBehaviour
 
     #region Device
 
-    void StartKinect()
+    public void StartKinect()
     {
         OnDestroy();
         device = Device.Open(deviceID);
@@ -131,17 +151,20 @@ public class KinectBuffer : MonoBehaviour
 
         device.StartImu();
         transformation = device.GetCalibration().CreateTransformation();
-
-        base64Frames = new string[numberFramesToRecord];
         float worldscaleDepth = ((KinectUtilities.depthRanges[(int)device.CurrentDepthMode].y * kinectSettings.depthRangeModifier.y) - (KinectUtilities.depthRanges[(int)device.CurrentDepthMode].x * kinectSettings.depthRangeModifier.x)) / 1000;
-        print("Depth Range:" + worldscaleDepth);
         mesh.transform.localPosition = new Vector3(0, 0, worldscaleDepth / 2);
         if (kinectSettings.transformationMode == TransformationMode.DepthToColor)
             mesh.transform.localScale = new Vector3(1.6f * worldscaleDepth, 0.9f * worldscaleDepth, worldscaleDepth);
         if (kinectSettings.transformationMode == TransformationMode.ColorToDepth)
-            mesh.transform.localScale = new Vector3(worldscaleDepth*2, worldscaleDepth*2, worldscaleDepth);
+            mesh.transform.localScale = new Vector3(worldscaleDepth, worldscaleDepth, worldscaleDepth);
 
         running = true;
+        Task CameraLooper = CameraLoop(device);
+    }
+
+    public void StopKinect()
+    {
+        running = false;
     }
 
     private async Task CameraLoop(Device device)
@@ -173,14 +196,16 @@ public class KinectBuffer : MonoBehaviour
                     {
                         matrixSize = new Vector3Int((int)(finalColor.WidthPixels * kinectSettings.volumeScale.x), (int)(finalColor.HeightPixels * kinectSettings.volumeScale.y), (int)((KinectUtilities.depthRanges[(int)device.CurrentDepthMode].y - KinectUtilities.depthRanges[(int)device.CurrentDepthMode].x) / 11 * kinectSettings.volumeScale.z));
                         volumeBuffer = new ComputeBuffer(matrixSize.x * matrixSize.y * matrixSize.z, 4 * sizeof(float), ComputeBufferType.Default);
-                        print("Made Volume Buffer || Matrix Size: " + matrixSize);
+                        //print("Made Volume Buffer || Matrix Size: " + matrixSize);
+                        extractedVolumeBuffer = new float[matrixSize.x * matrixSize.y * matrixSize.z * 4];
+                        extractedVolumeBytes = new byte[matrixSize.x * matrixSize.y * matrixSize.z * 4 * 4];
                     }
 
                     if (colorTexture == null)
                     {
                         colorTexture = new Texture2D(finalColor.WidthPixels, finalColor.HeightPixels, TextureFormat.BGRA32, false);
                         colorData = new byte[finalColor.Memory.Length];
-                        print("Made Color Texture");
+                        //print("Made Color Texture");
                     }
 
                     if (depthTexture == null)
@@ -188,7 +213,7 @@ public class KinectBuffer : MonoBehaviour
                         depthTexture = new Texture2D(finalDepth.WidthPixels, finalDepth.HeightPixels, TextureFormat.R16, false);
                         oldDepthTexture = new Texture2D(finalDepth.WidthPixels, finalDepth.HeightPixels, TextureFormat.R16, false);
                         depthData = new byte[finalDepth.Memory.Length];
-                        print("Made Depth Texture");
+                        //print("Made Depth Texture");
                     }
 
                     colorData = finalColor.Memory.ToArray();
@@ -203,16 +228,22 @@ public class KinectBuffer : MonoBehaviour
 
                     kinectProcessingShader.Dispatch(computeShaderKernelIndex, matrixSize.x / 16, matrixSize.y / 16, 1);
 
-                    float[] frame = new float[matrixSize.x * matrixSize.y * matrixSize.z * 4];
-                    volumeBuffer.GetData(frame);
+                    // Get the volume buffer data as a byte array 
+                    volumeBuffer.GetData(extractedVolumeBytes);
 
-                    // create a byte array and copy the floats into it...
-                    var byteArray = new byte[frame.Length * 4];
-                    Buffer.BlockCopy(frame, 0, byteArray, 0, byteArray.Length);
+                    // TODO: Test which is faster, or if a dedicated thread would be best
+                    //Option 1: Use the UserWorkItem Threadpool to manage thread for me
+                    ThreadPool.QueueUserWorkItem((state) => Postprocess((Byte[])state), extractedVolumeBytes);
 
-                    //new Thread(() => Postprocess(byteArray)).Start();
+                    //Option 2: Spawn a thread for each frame
+                    //new Thread(() => Postprocess(extractedVolumeBytes)).Start();
 
-                    ThreadPool.QueueUserWorkItem((state) => Postprocess((Byte[])state), byteArray);
+                    if (compressedBytes == 0)
+                    {
+                        byte[] compressedArray = CompressData(extractedVolumeBytes);
+                        compressedBytes = compressedArray.Length;
+                        maxRecordingSeconds = (maxFileSizeMb * 1000 * 1000) / (compressedBytes * KinectUtilities.FPStoInt(kinectSettings.fps));
+                    }
 
                     matt.SetBuffer("colors", volumeBuffer);
                     matt.SetInt("_MatrixX", matrixSize.x);
@@ -270,13 +301,14 @@ public class KinectBuffer : MonoBehaviour
         if (sendToServer)
         {
 
-            byte[] compressedArray = CompressData(data);
+            byte[] compressedArray = CompressDataLZ4(data);
 
             try
             {
                 if (connectionState == ConnectionState.JoinedServer)
                 {
-                    SendFrameToServer(thisFrameID, Convert.ToBase64String(compressedArray));
+                    SplitAndSend(maxPacketBytes, thisFrameID, Convert.ToBase64String(compressedArray));
+                    //SendFrameToServer(thisFrameID, Convert.ToBase64String(compressedArray));
                 }
             }
             catch (Exception ex)
@@ -287,26 +319,62 @@ public class KinectBuffer : MonoBehaviour
 
         if (saveToFile)
         {
-            byte[] compressedArray = CompressData(data);
+            // Use Built-in System.IO.Compression Deflate
+            //byte[] compressedArray = CompressData(data);
+
+            // Use LZ4 
+            byte[] compressedArray = CompressDataLZ4(data);
 
             try
             {
-                if (thisFrameID < numberFramesToRecord)
+                if (thisFrameID < base64Frames.Length)
                 {
                     base64Frames[thisFrameID] = Convert.ToBase64String(compressedArray);
+                    savedFrameCount++;
                 }
                 else
                 {
-                    saveToFile = false;
-                    triggerWriteToFile = true;
+                    StopRecording();
                 }
             }
             catch (Exception ex)
             {
                 print(ex.Message);
             }
-
         }
+    }
+
+
+    // TODO: Not the best solution, because it loses the absolute frame ID, but not sure what I'd use that for?
+    public void StartRecording()
+    {
+        base64Frames = new string[maxRecordingSeconds * KinectUtilities.FPStoInt(kinectSettings.fps)];
+
+        frameID = savedFrameCount;
+        saveToFile = true;
+
+        print("Recording started. Max recording length is " + maxRecordingSeconds + " seconds");
+    }
+
+    public void PauseRecording()
+    {
+        saveToFile = false;
+        print("Recording paused with " + savedFrameCount + " frames in the write buffer. Click stop to save to file, or record to continue appending to the current buffer");
+    }
+
+    public void StopRecording()
+    {
+        saveToFile = false;
+        triggerWriteToFile = true;
+        print("Recording stopped with " + savedFrameCount + " frames in the write buffer. Attempting to write to file...");
+    }
+
+    public static byte[] CompressDataLZ4(byte[] data)
+    {
+        byte[] compressedArray = new byte[LZ4Codec.MaximumOutputSize(data.Length)];
+        int num = LZ4Codec.Encode(data, 0, data.Length, compressedArray, 0, compressedArray.Length, LZ4Level.L00_FAST);
+        Array.Resize(ref compressedArray, num);
+        return compressedArray;
     }
 
     public static byte[] CompressData(byte[] data)
@@ -316,7 +384,7 @@ public class KinectBuffer : MonoBehaviour
         {
             using (MemoryStream memoryStream = new MemoryStream())
             {
-                using (DeflateStream deflateStream = new DeflateStream(memoryStream, CompressionMode.Compress))
+                using (DeflateStream deflateStream = new DeflateStream(memoryStream, System.IO.Compression.CompressionLevel.Fastest))
                 {
                     deflateStream.Write(data, 0, data.Length);
                 }
@@ -334,67 +402,39 @@ public class KinectBuffer : MonoBehaviour
 
     #region Saving
 
-    private async Task SavingLoop()
+    private void SavingLoop()
     {
         if (triggerWriteToFile)
         {
-            await WriteDataToFile();
+            new Thread(() => WriteDataToFile()).Start();
+            triggerWriteToFile = false;
         }
     }
 
-    // This is a "mock" async method that needs to get turned into a real one
-    private Task<bool> WriteDataToFile()
+    private void WriteDataToFile()
     {
         print("Saving volume data....");
         saveToFile = false;
         int i = 0;
         StreamWriter writer = new System.IO.StreamWriter(filepath, false, Encoding.UTF8);
+
+        writer.Write(kinectSettings.Serialized + KinectUtilities.configBreak);
         foreach (string frame in base64Frames)
         {
-            if (frame != "")
+            if (frame != null && frame != "")
             {
                 i++;
-                print(i);
                 writer.Write(frame + KinectUtilities.frameBreak);
             }
         }
         writer.Close();
         writer.Dispose();
         print(i + " frames of volume data have been saved to " + filepath);
-        triggerWriteToFile = false;
-        return Task.FromResult(true);
     }
 
     #endregion
 
     #region Networking 
-
-    //private async Task NetworkingLoop()
-    //{
-    //    while (sendToServer)
-    //    {
-    //        ListenForData(serverSocket);
-    //    }
-    //}
-
-    //// This is a "mock" async method that needs to get turned into a real one
-    //private Task<SocketAsyncEventArgs> ListenForData(Socket socket)
-    //{
-    //    if (socket != null)
-    //    {
-    //        int available = socket.Available;
-    //        if (available > 0)
-    //        {
-    //            print("Available:" + available);
-    //            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
-    //            args.SetBuffer(new byte[available], 0, available);
-    //            args.Completed += OnDataRecieved;
-    //            socket.ReceiveAsync(args);
-    //            return Task.FromResult(args);
-    //        }
-    //    }
-    //    return null;
-    //}
 
     private void ListenForData(Socket socket)
     {
@@ -403,7 +443,6 @@ public class KinectBuffer : MonoBehaviour
             int available = socket.Available;
             if (available > 0)
             {
-                print("Available:" + available);
                 SocketAsyncEventArgs args = new SocketAsyncEventArgs();
                 args.SetBuffer(new byte[available], 0, available);
                 args.Completed += OnDataRecieved;
@@ -450,7 +489,7 @@ public class KinectBuffer : MonoBehaviour
             serverSocket.Bind(new IPEndPoint(IPAddress.Any, 0));
 
             // TODO: Make this a string builder, and not a either/or switch
-            string message = "JOIN" + "|" + clientRole + "|" + clientName + "|" + kinectSettings.Serialize();
+            string message = "JOIN" + "|" + clientRole + "|" + clientName + "|" + kinectSettings.Serialized;
             byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
             serverSocket.SendTo(data, serverEndpoint);
             print("Server JOIN request sent");
@@ -505,7 +544,7 @@ public class KinectBuffer : MonoBehaviour
                     case "PROVIDE":
                         if (split[2].Contains(providerName)) // this is a gross hack to get around blank space after the split - fix it
                         {
-                            print("Successfully sent frame " + split[3] + " to server");
+                            //print("Successfully sent frame " + split[3] + " to server");
                         }
                         break;
                     default:
@@ -523,7 +562,7 @@ public class KinectBuffer : MonoBehaviour
                         print(split[2] + " " + split[3] + " has left the server");
                         break;
                     case "PROVIDE":
-                        print("Frame " + split[3] + " recieved from provider " + split[2]);
+                        //print("Frame " + split[3] + " recieved from provider " + split[2]);
                         break;
                     default:
                         print(split[1]);
@@ -543,6 +582,7 @@ public class KinectBuffer : MonoBehaviour
             try
             {
                 string message = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + frameData;
+
                 byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
                 serverSocket.SendTo(data, serverEndpoint);
                 //print("Frame " + frameNumber + " sent to server");
@@ -551,6 +591,39 @@ public class KinectBuffer : MonoBehaviour
             {
                 print("Error: " + x.ToString());
             }
+        }
+    }
+
+    public void SplitAndSend(int maxBytesPerMessage, int frameNumber, string frameData)
+    {
+        //print(frameData.Length);
+        List<string> segments = new List<string>();
+
+        int numberOfSegments = 0;
+        int availableBytesPerMessage = maxBytesPerMessage - 50; // Subtract 50 extra for the header
+
+        for (int i = 0; i < frameData.Length;)
+        {
+            if ((frameData.Length - i - 1) > availableBytesPerMessage)
+            {
+                segments.Add(frameData.Substring(i, availableBytesPerMessage));
+                i += availableBytesPerMessage;
+                numberOfSegments++;
+            }
+            else
+            {
+                segments.Add(frameData.Substring(i, frameData.Length - i));
+                i += availableBytesPerMessage;
+                numberOfSegments++;
+            }
+        }
+        print(segments.Count);
+        string messageHeader = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + numberOfSegments + "|";
+
+        for (int s = 0; s < segments.Count; s++)
+        {
+            byte[] data = System.Text.Encoding.UTF8.GetBytes(messageHeader + s + "|" + segments[s]);
+            serverSocket.SendTo(data, serverEndpoint);
         }
     }
 
