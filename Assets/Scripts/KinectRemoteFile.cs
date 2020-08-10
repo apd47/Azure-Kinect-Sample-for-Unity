@@ -17,12 +17,10 @@ public class KinectRemoteFile
     //public int serverPort;
     public string providerName;
     public string clientName;
-<<<<<<< Updated upstream:Assets/Scripts/KinectRemoteFile.cs
     public LinkedList<KinectSocketFrame> frames;
     public KinectConfiguration configuration;
     public Vector3Int matrixSize;
 
-=======
     public int udpPort = 1935;
     public int tcpPort = 1936;
 
@@ -31,13 +29,10 @@ public class KinectRemoteFile
     private static ManualResetEvent receiveDone = new ManualResetEvent(true);
 
     public ConnectionState connectionState = ConnectionState.Disconnected;
->>>>>>> Stashed changes:Assets/Scripts/KinectRemoteProvider.cs
-
     ClientRole clientRole = ClientRole.RECEIVER;
     IPEndPoint serverEndpoint;
     Socket serverSocket;
 
-<<<<<<< Updated upstream:Assets/Scripts/KinectRemoteFile.cs
     public enum ClientRole
     {
         PROVIDER,
@@ -63,10 +58,7 @@ public class KinectRemoteFile
         }
     }
 
-    public KinectRemoteFile(string hostname, int port, KinectConfiguration overrideConfiguration)
-=======
-    public KinectRemoteProvider(string hostname, TransmissionMode transmissionMode, KinectConfiguration overrideConfiguration)
->>>>>>> Stashed changes:Assets/Scripts/KinectRemoteProvider.cs
+    public KinectRemoteFile(string hostname, TransmissionMode transmissionMode, KinectConfiguration overrideConfiguration)
     {
         this.serverHostname = hostname;
         //this.serverPort = port;
@@ -378,9 +370,6 @@ public class KinectRemoteFile
         JoinedServer,
         SubscribedToProvider
     }
-
-    public ConnectionState connectionState = ConnectionState.Disconnected;
-
     private void ProcessReceivedData(string received)
     {
         string[] split = received.Split('|');

@@ -53,16 +53,13 @@ public class KinectBuffer : MonoBehaviour
     public string providerName;
     public string serverHostname;
 <<<<<<< Updated upstream
-<<<<<<< Updated upstream
     public int serverPort;
-=======
 =======
 >>>>>>> Stashed changes
     public int udpPort = 1935;
     public int tcpPort = 1936;
 
     public int maxPacketBytes = 1024;
->>>>>>> Stashed changes
     ConnectionState connectionState = ConnectionState.Disconnected;
     IPEndPoint serverEndpoint;
     Socket serverSocket;
@@ -170,8 +167,6 @@ public class KinectBuffer : MonoBehaviour
             mesh.transform.localScale = new Vector3(worldscaleDepth*2, worldscaleDepth*2, worldscaleDepth);
 
         running = true;
-<<<<<<< Updated upstream
-=======
         Task CameraLooper = CameraLoop(device);
     }
 
@@ -179,10 +174,6 @@ public class KinectBuffer : MonoBehaviour
     {
         running = false;
         OnCloseKinect();
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
     }
 
     private async Task CameraLoop(Device device)
@@ -318,14 +309,7 @@ public class KinectBuffer : MonoBehaviour
             {
                 if (connectionState == ConnectionState.JoinedServer)
                 {
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
                     //SplitAndSend(maxPacketBytes, thisFrameID, Convert.ToBase64String(compressedArray));
->>>>>>> Stashed changes
-=======
-                    //SplitAndSend(maxPacketBytes, thisFrameID, Convert.ToBase64String(compressedArray));
->>>>>>> Stashed changes
                     SendFrameToServer(thisFrameID, Convert.ToBase64String(compressedArray));
                 }
             }
@@ -486,6 +470,25 @@ public class KinectBuffer : MonoBehaviour
                 new AsyncCallback(ReceiveCallback), state);
         }
         catch (Exception e)
+<<<<<<< Updated upstream
+        {
+            Receive(client);
+            //int available = socket.Available;
+            //if (available > 0)
+            //{
+            //    SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+            //    args.SetBuffer(new byte[available], 0, available);
+            //    args.Completed += OnDataRecieved;
+            //    socket.ReceiveAsync(args);
+            //}
+        }
+    }
+
+    private void ReceiveCallback(IAsyncResult ar)
+    {
+        try
+        {
+=======
         {
             Console.WriteLine(e.ToString());
         }
@@ -495,75 +498,44 @@ public class KinectBuffer : MonoBehaviour
     {
         try
         { 
+>>>>>>> Stashed changes
             StateObject state = (StateObject)ar.AsyncState;
             Socket client = state.workSocket;
 
             int bytesRead = client.EndReceive(ar);
             if (bytesRead > 0)
-<<<<<<< Updated upstream
             {
                 // There might be more data, so store the data received so far.  
                 state.sb.Append(Encoding.ASCII.GetString(state.buffer, 0, bytesRead));
 
                 // Get the rest of the data.
                 if (client.Available > 0)
-                {  
-                    client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
-                        new AsyncCallback(ReceiveCallback), state);
-                }
-                else
-                {
-                    // All the data has arrived
-                    if (state.sb.Length > 1)
-                    {
-                        receiveDone.Set();
-                        ProcessReceivedData(state.sb.ToString());
-                    }
-                }
-            }
-            else
-            {
 <<<<<<< Updated upstream
-                print("Available:" + available);
-                SocketAsyncEventArgs args = new SocketAsyncEventArgs();
-                args.SetBuffer(new byte[available], 0, available);
-                args.Completed += OnDataRecieved;
-                socket.ReceiveAsync(args);
-=======
-=======
-            {
-                // There might be more data, so store the data received so far.  
-                state.sb.Append(Encoding.ASCII.GetString(state.buffer, 0, bytesRead));
-
-                // Get the rest of the data.
-                if (client.Available > 0)
-                {  
-                    client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
-                        new AsyncCallback(ReceiveCallback), state);
-                }
-                else
                 {
-                    // All the data has arrived
-                    if (state.sb.Length > 1)
-                    {
-                        receiveDone.Set();
-                        ProcessReceivedData(state.sb.ToString());
-                    }
-                }
-            }
-            else
-            {
+=======
+                {  
 >>>>>>> Stashed changes
+                    client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                        new AsyncCallback(ReceiveCallback), state);
+                }
+                else
+                {
+                    // All the data has arrived
+                    if (state.sb.Length > 1)
+                    {
+                        receiveDone.Set();
+                        ProcessReceivedData(state.sb.ToString());
+                    }
+                }
+            }
+            else
+            {
                 // All the data has arrived
                 if (state.sb.Length > 1)
                 {
                     receiveDone.Set();
                     ProcessReceivedData(state.sb.ToString());
                 }
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
             }
         }
         catch (Exception e)
@@ -624,27 +596,17 @@ public class KinectBuffer : MonoBehaviour
                     break;
             }
 
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-            // TODO: Make this a string builder, and not a either/or switch
-            string message = "JOIN" + "|" + clientRole + "|" + clientName + "|" + kinectSettings.Serialize();
-            byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
-            serverSocket.SendTo(data, serverEndpoint);
-            print("Server JOIN request sent");
-=======
-=======
->>>>>>> Stashed changes
             if (serverSocket != null)
             {
                 // TODO: Make this a string builder, and not a either/or switch
+<<<<<<< Updated upstream
+                string message = "JOIN" + "|" + clientRole + "|" + clientName + "|" + kinectSettings.Serialize();
+=======
                 string message = "JOIN" + "|" + clientRole + "|" + clientName + "|" + kinectSettings.Serialized;
+>>>>>>> Stashed changes
                 Send(serverSocket, message);
                 print("Server JOIN request sent");
             }
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
         }
         catch (Exception x)
         {
@@ -789,15 +751,11 @@ public class KinectBuffer : MonoBehaviour
             {
                 string message = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + frameData;
 <<<<<<< Updated upstream
-<<<<<<< Updated upstream
                 byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
                 serverSocket.SendTo(data, serverEndpoint);
 =======
-                Send(serverSocket, message);
 >>>>>>> Stashed changes
-=======
                 Send(serverSocket, message);
->>>>>>> Stashed changes
                 //print("Frame " + frameNumber + " sent to server");
             }
             catch (Exception x)
@@ -807,8 +765,6 @@ public class KinectBuffer : MonoBehaviour
         }
     }
 
-<<<<<<< Updated upstream
-=======
     public void SplitAndSend(int maxBytesPerMessage, int frameNumber, string frameData)
     {
         //print(frameData.Length);
@@ -841,8 +797,6 @@ public class KinectBuffer : MonoBehaviour
             Send(serverSocket, message);
         }
     }
-
->>>>>>> Stashed changes
     #endregion
 
     #region IMU
