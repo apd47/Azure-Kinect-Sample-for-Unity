@@ -52,10 +52,7 @@ public class KinectBuffer : MonoBehaviour
     public TransmissionMode transmissionMode;
     public string providerName;
     public string serverHostname;
-<<<<<<< Updated upstream
     public int serverPort;
-=======
->>>>>>> Stashed changes
     public int udpPort = 1935;
     public int tcpPort = 1936;
 
@@ -470,7 +467,6 @@ public class KinectBuffer : MonoBehaviour
                 new AsyncCallback(ReceiveCallback), state);
         }
         catch (Exception e)
-<<<<<<< Updated upstream
         {
             Receive(client);
             //int available = socket.Available;
@@ -484,21 +480,11 @@ public class KinectBuffer : MonoBehaviour
         }
     }
 
-    private void ReceiveCallback(IAsyncResult ar)
-    {
-        try
-        {
-=======
-        {
-            Console.WriteLine(e.ToString());
-        }
-    }
 
     private void ReceiveCallback(IAsyncResult ar)
     {
         try
         { 
->>>>>>> Stashed changes
             StateObject state = (StateObject)ar.AsyncState;
             Socket client = state.workSocket;
 
@@ -510,11 +496,7 @@ public class KinectBuffer : MonoBehaviour
 
                 // Get the rest of the data.
                 if (client.Available > 0)
-<<<<<<< Updated upstream
-                {
-=======
-                {  
->>>>>>> Stashed changes
+                { 
                     client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
                         new AsyncCallback(ReceiveCallback), state);
                 }
@@ -599,11 +581,7 @@ public class KinectBuffer : MonoBehaviour
             if (serverSocket != null)
             {
                 // TODO: Make this a string builder, and not a either/or switch
-<<<<<<< Updated upstream
                 string message = "JOIN" + "|" + clientRole + "|" + clientName + "|" + kinectSettings.Serialize();
-=======
-                string message = "JOIN" + "|" + clientRole + "|" + clientName + "|" + kinectSettings.Serialized;
->>>>>>> Stashed changes
                 Send(serverSocket, message);
                 print("Server JOIN request sent");
             }
@@ -750,11 +728,8 @@ public class KinectBuffer : MonoBehaviour
             try
             {
                 string message = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + frameData;
-<<<<<<< Updated upstream
                 byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
                 serverSocket.SendTo(data, serverEndpoint);
-=======
->>>>>>> Stashed changes
                 Send(serverSocket, message);
                 //print("Frame " + frameNumber + " sent to server");
             }

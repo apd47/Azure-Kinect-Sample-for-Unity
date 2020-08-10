@@ -23,10 +23,7 @@ public class KinectRemotePlayback : MonoBehaviour
 
     public float MaxWaitSeconds = 1;
     public TransmissionMode transmissionMode;
-<<<<<<< Updated upstream
 
-=======
->>>>>>> Stashed changes
     public string clientName;
     public string providerName;
     public string serverHostname;
