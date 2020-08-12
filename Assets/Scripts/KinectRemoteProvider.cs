@@ -17,7 +17,7 @@ public class KinectRemoteProvider : KinectSource
     public string clientName;
     public ConnectionState connectionState = ConnectionState.Disconnected;
 
-    ClientRole clientRole = ClientRole.RECEIVER;
+    EntityType clientRole = EntityType.RECEIVER;
     IPEndPoint serverEndpoint;
     Socket serverSocket;
 

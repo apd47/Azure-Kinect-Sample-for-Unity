@@ -7,7 +7,7 @@ using UnityEngine.UI;
 public class ProviderUIManager : MonoBehaviour
 {
 
-    public KinectBuffer buffer;
+    public KinectProvider buffer;
     public InputField hostname;
     public InputField port;
     public InputField providerName;

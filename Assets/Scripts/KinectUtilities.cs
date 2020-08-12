@@ -39,9 +39,50 @@ public class KinectUtilities
     }
 }
 
-
-public enum ClientRole
+public enum KinectTask
 {
+    NONE,
+    JOIN,
+    LEAVE,
+    SUBSCRIBE,
+    UNSUBSCRIBE,
+    ADDFRAME,
+    ADDBLOCK,
+    REQUESTBLOCK,
+    REQUESTFRAME,
+    FINISHFRAME,
+    CONFIRM,
+    FAIL,
+    ALERT
+}
+
+public enum KinectCompressionType
+{
+    NONE,
+    LZ4
+}
+
+public enum FailReason
+{
+    NONE,
+    MISSINGFRAME,
+    MISSINGBLOCKS,
+    MISSINGPROVIDER,
+    NOTSUBSCRIBEDYET,
+    INCOMPLETEFRAME,
+    EMPTYBLOCK
+}
+
+public enum FrameType
+{
+    COLOR, 
+    DEPTH, 
+    VOLUME
+}
+
+public enum EntityType
+{
+    SERVER,
     PROVIDER,
     RECEIVER
 }

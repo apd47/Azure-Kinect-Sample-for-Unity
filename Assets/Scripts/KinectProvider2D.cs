@@ -12,69 +12,54 @@ using UnityEngine;
 using System.Collections.Generic;
 using System.Data.SqlTypes;
 using K4os.Compression.LZ4;
+using System.Linq;
+using System.Net.Http.Headers;
 
-public class KinectProvider2D : MonoBehaviour
+public class KinectProvider2D : KinectProvider
 {
     #region Variables
     [Header("Device")]
-    public int deviceID = 0;
     public bool collectCameraData;
-    public KinectConfiguration kinectSettings;
     Device device;
     Transformation transformation;
     bool running = true;
-    Vector3Int matrixSize;
+    Vector2Int matrixSize;
 
     [Header("Reconstruction")]
     public ComputeShader kinectProcessingShader;
-    public Filter filter;
     int frameID = 0;
     int computeShaderKernelIndex = -1;
-    ComputeBuffer volumeBuffer;
-    float[] extractedVolumeBuffer;
-    byte[] extractedVolumeBytes;
+    ComputeBuffer colorBuffer;
+    ComputeBuffer depthBuffer;
+
+    byte[] extractedColorBytes;
+    byte[] extractedDepthBytes;
+
     Image finalColor;
     byte[] colorData;
     Image finalDepth;
     byte[] depthData;
     Texture2D colorTexture;
     Texture2D depthTexture;
-    Texture2D oldDepthTexture;
 
     [Header("Rendering")]
-    public MeshRenderer mesh;
-
-    [Header("Recording")]
-    public string filepath;
-    public int maxFileSizeMb = 500;
-    public bool startRecording;
-    public bool pauseRecording;
-    public bool stopRecording;
-    bool saveToFile;
-    bool triggerWriteToFile;
-    int compressedBytes = 0;
-    int maxRecordingSeconds;
-    int savedFrameCount;
-    string[] base64Frames;
+    public MeshRenderer colorMesh;
+    public MeshRenderer depthMesh;
 
     [Header("Networking")]
     public bool sendToServer;
-    public string providerName;
-    public string serverHostname;
-    public int serverPort;
-    public int maxPacketBytes = 1024;
     ConnectionState connectionState = ConnectionState.Disconnected;
     IPEndPoint serverEndpoint;
     Socket serverSocket;
 
-    [Header("IMU Settings")]
-    public bool collectIMUData;
-    public float accelerometerMinValid = 0.5f;
-    public float accelerometerMaxValid = 2.0f;
-    public float accelerometerWeighting = 0.02f;
-    Vector3 currentAngles;
-    DateTime lastFrame;
-    float dt;
+    //[Header("IMU Settings")]
+    //public bool collectIMUData;
+    //public float accelerometerMinValid = 0.5f;
+    //public float accelerometerMaxValid = 2.0f;
+    //public float accelerometerWeighting = 0.02f;
+    //Vector3 currentAngles;
+    //DateTime lastFrame;
+    //float dt;
     #endregion
 
     #region Unity
@@ -83,32 +68,21 @@ public class KinectProvider2D : MonoBehaviour
     private void Update()
     {
         ListenForData(serverSocket);
-        SavingLoop();
-
-        if (startRecording)
-        {
-            StartRecording();
-            startRecording = false;
-        }
-        if (pauseRecording)
-        {
-            PauseRecording();
-            pauseRecording = false;
-        }
-        if (stopRecording)
-        {
-            StopRecording();
-            stopRecording = false;
-        }
     }
 
     private void OnDestroy()
     {
         running = false;
-        if (volumeBuffer != null)
+        if (colorBuffer != null)
         {
-            volumeBuffer.Release();
-            volumeBuffer = null;
+            colorBuffer.Release();
+            colorBuffer = null;
+        }
+
+        if (depthBuffer != null)
+        {
+            depthBuffer.Release();
+            depthBuffer = null;
         }
 
         if (device != null)
@@ -120,14 +94,13 @@ public class KinectProvider2D : MonoBehaviour
 
         if (colorTexture != null)
             Destroy(colorTexture);
+
         if (depthTexture != null)
             Destroy(depthTexture);
-        if (oldDepthTexture != null)
-            Destroy(oldDepthTexture);
 
         if (connectionState != ConnectionState.Disconnected)
         {
-            LeaveServer(providerName, ClientRole.PROVIDER);
+            LeaveServer(providerName, EntityType.PROVIDER);
             serverSocket.Close();
         }
     }
@@ -151,12 +124,6 @@ public class KinectProvider2D : MonoBehaviour
 
         device.StartImu();
         transformation = device.GetCalibration().CreateTransformation();
-        float worldscaleDepth = ((KinectUtilities.depthRanges[(int)device.CurrentDepthMode].y * kinectSettings.depthRangeModifier.y) - (KinectUtilities.depthRanges[(int)device.CurrentDepthMode].x * kinectSettings.depthRangeModifier.x)) / 1000;
-        mesh.transform.localPosition = new Vector3(0, 0, worldscaleDepth / 2);
-        if (kinectSettings.transformationMode == TransformationMode.DepthToColor)
-            mesh.transform.localScale = new Vector3(1.6f * worldscaleDepth, 0.9f * worldscaleDepth, worldscaleDepth);
-        if (kinectSettings.transformationMode == TransformationMode.ColorToDepth)
-            mesh.transform.localScale = new Vector3(worldscaleDepth, worldscaleDepth, worldscaleDepth);
 
         running = true;
         Task CameraLooper = CameraLoop(device);
@@ -169,7 +136,9 @@ public class KinectProvider2D : MonoBehaviour
 
     private async Task CameraLoop(Device device)
     {
-        Material matt = mesh.material;
+        Material colorMatt = colorMesh.material;
+        Material depthMatt = depthMesh.material;
+
         while (running)
         {
             if (collectCameraData)
@@ -192,28 +161,34 @@ public class KinectProvider2D : MonoBehaviour
                             break;
                     }
 
-                    if (volumeBuffer == null)
+                    if (colorBuffer == null)
                     {
-                        matrixSize = new Vector3Int((int)(finalColor.WidthPixels * kinectSettings.volumeScale.x), (int)(finalColor.HeightPixels * kinectSettings.volumeScale.y), (int)((KinectUtilities.depthRanges[(int)device.CurrentDepthMode].y - KinectUtilities.depthRanges[(int)device.CurrentDepthMode].x) / 11 * kinectSettings.volumeScale.z));
-                        volumeBuffer = new ComputeBuffer(matrixSize.x * matrixSize.y * matrixSize.z, 4 * sizeof(float), ComputeBufferType.Default);
-                        //print("Made Volume Buffer || Matrix Size: " + matrixSize);
-                        extractedVolumeBuffer = new float[matrixSize.x * matrixSize.y * matrixSize.z * 4];
-                        extractedVolumeBytes = new byte[matrixSize.x * matrixSize.y * matrixSize.z * 4 * 4];
+                        matrixSize = new Vector2Int((int)(finalColor.WidthPixels * kinectSettings.volumeScale.x), (int)(finalColor.HeightPixels * kinectSettings.volumeScale.y));
+                        colorBuffer = new ComputeBuffer(matrixSize.x * matrixSize.y, 3 * sizeof(float), ComputeBufferType.Default);
+                        print("Made Color GPU Buffer || Matrix Size: " + matrixSize);
+                        extractedColorBytes = new byte[matrixSize.x * matrixSize.y * 3 * 4];
+                    }
+
+                    if (depthBuffer == null)
+                    {
+                        matrixSize = new Vector2Int((int)(finalDepth.WidthPixels * kinectSettings.volumeScale.x), (int)(finalDepth.HeightPixels * kinectSettings.volumeScale.y));
+                        depthBuffer = new ComputeBuffer(matrixSize.x * matrixSize.y, 3 * sizeof(float), ComputeBufferType.Default);
+                        print("Made Depth GPU Buffer || Matrix Size: " + matrixSize);
+                        extractedDepthBytes = new byte[matrixSize.x * matrixSize.y * 3 * 4];
                     }
 
                     if (colorTexture == null)
                     {
                         colorTexture = new Texture2D(finalColor.WidthPixels, finalColor.HeightPixels, TextureFormat.BGRA32, false);
                         colorData = new byte[finalColor.Memory.Length];
-                        //print("Made Color Texture");
+                        print("Made Color Texture");
                     }
 
                     if (depthTexture == null)
                     {
                         depthTexture = new Texture2D(finalDepth.WidthPixels, finalDepth.HeightPixels, TextureFormat.R16, false);
-                        oldDepthTexture = new Texture2D(finalDepth.WidthPixels, finalDepth.HeightPixels, TextureFormat.R16, false);
                         depthData = new byte[finalDepth.Memory.Length];
-                        //print("Made Depth Texture");
+                        print("Made Depth Texture");
                     }
 
                     colorData = finalColor.Memory.ToArray();
@@ -228,29 +203,25 @@ public class KinectProvider2D : MonoBehaviour
 
                     kinectProcessingShader.Dispatch(computeShaderKernelIndex, matrixSize.x / 16, matrixSize.y / 16, 1);
 
-                    // Get the volume buffer data as a byte array 
-                    volumeBuffer.GetData(extractedVolumeBytes);
+                    // Get the buffer data as byte arrays 
+                    colorBuffer.GetData(extractedColorBytes);
+                    depthBuffer.GetData(extractedDepthBytes);
 
                     // TODO: Test which is faster, or if a dedicated thread would be best
-                    //Option 1: Use the UserWorkItem Threadpool to manage thread for me
-                    ThreadPool.QueueUserWorkItem((state) => Postprocess((Byte[])state), extractedVolumeBytes);
+                    //Option 1: Use the UserWorkItem Threadpool to manage thread for me - do i need to use a state here? is this threadsafe as written? 
+                    ThreadPool.QueueUserWorkItem((state) => Postprocess(extractedColorBytes, extractedDepthBytes, KinectCompressionType.LZ4));
 
                     //Option 2: Spawn a thread for each frame
-                    //new Thread(() => Postprocess(extractedVolumeBytes)).Start();
+                    //new Thread(() => Postprocess(extractedColorBytes, extractedDepthBytes)).Start();
 
-                    if (compressedBytes == 0)
-                    {
-                        byte[] compressedArray = CompressData(extractedVolumeBytes);
-                        compressedBytes = compressedArray.Length;
-                        maxRecordingSeconds = (maxFileSizeMb * 1000 * 1000) / (compressedBytes * KinectUtilities.FPStoInt(kinectSettings.fps));
-                    }
+                    colorMatt.SetBuffer("colors", colorBuffer);
+                    colorMatt.SetInt("_MatrixX", matrixSize.x);
+                    colorMatt.SetInt("_MatrixY", matrixSize.y);
 
-                    matt.SetBuffer("colors", volumeBuffer);
-                    matt.SetInt("_MatrixX", matrixSize.x);
-                    matt.SetInt("_MatrixY", matrixSize.y);
-                    matt.SetInt("_MatrixZ", matrixSize.z);
+                    depthMatt.SetBuffer("colors", depthBuffer);
+                    depthMatt.SetInt("_MatrixX", matrixSize.x);
+                    depthMatt.SetInt("_MatrixY", matrixSize.y);
 
-                    Graphics.CopyTexture(depthTexture, oldDepthTexture);
                 }
             }
             else
@@ -268,106 +239,38 @@ public class KinectProvider2D : MonoBehaviour
     private void configureComputeShader()
     {
         // Apply Buffer Updates
-        computeShaderKernelIndex = kinectProcessingShader.FindKernel("ToBuffer");
+        computeShaderKernelIndex = kinectProcessingShader.FindKernel("ToBuffers");
+
         kinectProcessingShader.SetInt("_MatrixX", matrixSize.x);
         kinectProcessingShader.SetInt("_MatrixY", matrixSize.y);
-        kinectProcessingShader.SetInt("_MatrixZ", matrixSize.z);
 
         kinectProcessingShader.SetTexture(computeShaderKernelIndex, "ColorTex", colorTexture);
         kinectProcessingShader.SetTexture(computeShaderKernelIndex, "DepthTex", depthTexture);
-        kinectProcessingShader.SetTexture(computeShaderKernelIndex, "oldDepthTexture", oldDepthTexture);
-        kinectProcessingShader.SetBuffer(computeShaderKernelIndex, "ResultBuffer", volumeBuffer);
-        kinectProcessingShader.SetInt("minDepth", (int)(KinectUtilities.depthRanges[(int)device.CurrentDepthMode].x * kinectSettings.depthRangeModifier.x));
-        kinectProcessingShader.SetInt("maxDepth", (int)(KinectUtilities.depthRanges[(int)device.CurrentDepthMode].y * kinectSettings.depthRangeModifier.y));
-
-        if (filter.useFilter)
-        {
-            Vector4 filterValue = filter.getFilterValue();
-            kinectProcessingShader.SetVector("filterColor", filterValue);
-            kinectProcessingShader.SetInt("filterType", (int)filter.filterType);
-        }
-        else
-        {
-            kinectProcessingShader.SetVector("filterColor", new Vector4(0.5f, 0.5f, 0.5f, 0.5f));
-            kinectProcessingShader.SetInt("filterType", 0);
-        }
+        kinectProcessingShader.SetBuffer(computeShaderKernelIndex, "ColorResultBuffer", colorBuffer);
+        kinectProcessingShader.SetBuffer(computeShaderKernelIndex, "DepthResultBuffer", depthBuffer);
     }
 
-    public void Postprocess(byte[] data)
+    public void Postprocess(byte[] colorData, byte[] depthData, KinectCompressionType compressionType)
     {
-        int thisFrameID = frameID;
-        frameID++;
+        MaintainFramePair(colorData, depthData, compressionType);
 
-        if (sendToServer)
+        if (sendToServer && connectionState == ConnectionState.JoinedServer)
         {
-
-            byte[] compressedArray = CompressDataLZ4(data);
-
             try
             {
-                if (connectionState == ConnectionState.JoinedServer)
+                if (!currentFramePair.transmissionStarted)
                 {
-                    SplitAndSend(maxPacketBytes, thisFrameID, Convert.ToBase64String(compressedArray));
-                    //SendFrameToServer(thisFrameID, Convert.ToBase64String(compressedArray));
+                    currentFramePair.SendFramePairToServer(maxPacketBytes);
                 }
             }
             catch (Exception ex)
             {
                 print(ex.Message);
-            }
-        }
-
-        if (saveToFile)
-        {
-            // Use Built-in System.IO.Compression Deflate
-            //byte[] compressedArray = CompressData(data);
-
-            // Use LZ4 
-            byte[] compressedArray = CompressDataLZ4(data);
-
-            try
-            {
-                if (thisFrameID < base64Frames.Length)
-                {
-                    base64Frames[thisFrameID] = Convert.ToBase64String(compressedArray);
-                    savedFrameCount++;
-                }
-                else
-                {
-                    StopRecording();
-                }
-            }
-            catch (Exception ex)
-            {
-                print(ex.Message);
+                currentFramePair.transmissionStarted = false;
             }
         }
     }
 
-
-    // TODO: Not the best solution, because it loses the absolute frame ID, but not sure what I'd use that for?
-    public void StartRecording()
-    {
-        base64Frames = new string[maxRecordingSeconds * KinectUtilities.FPStoInt(kinectSettings.fps)];
-
-        frameID = savedFrameCount;
-        saveToFile = true;
-
-        print("Recording started. Max recording length is " + maxRecordingSeconds + " seconds");
-    }
-
-    public void PauseRecording()
-    {
-        saveToFile = false;
-        print("Recording paused with " + savedFrameCount + " frames in the write buffer. Click stop to save to file, or record to continue appending to the current buffer");
-    }
-
-    public void StopRecording()
-    {
-        saveToFile = false;
-        triggerWriteToFile = true;
-        print("Recording stopped with " + savedFrameCount + " frames in the write buffer. Attempting to write to file...");
-    }
 
     public static byte[] CompressDataLZ4(byte[] data)
     {
@@ -400,40 +303,6 @@ public class KinectProvider2D : MonoBehaviour
 
     #endregion
 
-    #region Saving
-
-    private void SavingLoop()
-    {
-        if (triggerWriteToFile)
-        {
-            new Thread(() => WriteDataToFile()).Start();
-            triggerWriteToFile = false;
-        }
-    }
-
-    private void WriteDataToFile()
-    {
-        print("Saving volume data....");
-        saveToFile = false;
-        int i = 0;
-        StreamWriter writer = new System.IO.StreamWriter(filepath, false, Encoding.UTF8);
-
-        writer.Write(kinectSettings.Serialized + KinectUtilities.configBreak);
-        foreach (string frame in base64Frames)
-        {
-            if (frame != null && frame != "")
-            {
-                i++;
-                writer.Write(frame + KinectUtilities.frameBreak);
-            }
-        }
-        writer.Close();
-        writer.Dispose();
-        print(i + " frames of volume data have been saved to " + filepath);
-    }
-
-    #endregion
-
     #region Networking 
 
     private void ListenForData(Socket socket)
@@ -453,13 +322,13 @@ public class KinectProvider2D : MonoBehaviour
 
     public void Join()
     {
-        JoinServer(providerName, ClientRole.PROVIDER);
+        JoinServer(providerName, EntityType.PROVIDER);
     }
 
     public void Leave()
     {
         sendToServer = false;
-        LeaveServer(providerName, ClientRole.PROVIDER);
+        LeaveServer(providerName, EntityType.PROVIDER);
     }
 
     public void StartSendingFrames()
@@ -472,7 +341,44 @@ public class KinectProvider2D : MonoBehaviour
         sendToServer = false;
     }
 
-    void JoinServer(string clientName, ClientRole clientRole)
+    char majorDelimiter = '|';
+    char minorDelimiter = '~';
+
+    string BuildMessage(EntityType entityType, string entityName, KinectTask task, object[] taskVariables)
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.Append(entityType.ToString());
+        sb.Append(majorDelimiter);
+        sb.Append(entityName);
+        sb.Append(majorDelimiter);
+        sb.Append(task.ToString());
+        sb.Append(majorDelimiter);
+        foreach (object variable in taskVariables)
+        {
+            sb.Append(variable.ToString());
+            sb.Append(minorDelimiter);
+        }
+        sb.Append(majorDelimiter);
+        return sb.ToString();
+    }
+
+    void SendServerMessage(KinectTask task, object[] taskVariables)
+    {
+        string message = BuildMessage(EntityType.PROVIDER, providerName, task, taskVariables);
+        byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
+        serverSocket.SendTo(data, serverEndpoint);
+    }
+
+
+    void SendServerMessage(KinectTask task)
+    {
+        string message = BuildMessage(EntityType.PROVIDER, providerName, task, new object[0]);
+        byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
+        serverSocket.SendTo(data, serverEndpoint);
+    }
+
+
+    void JoinServer(string clientName, EntityType clientRole)
     {
         try
         {
@@ -489,9 +395,7 @@ public class KinectProvider2D : MonoBehaviour
             serverSocket.Bind(new IPEndPoint(IPAddress.Any, 0));
 
             // TODO: Make this a string builder, and not a either/or switch
-            string message = "JOIN" + "|" + clientRole + "|" + clientName + "|" + kinectSettings.Serialized;
-            byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
-            serverSocket.SendTo(data, serverEndpoint);
+            SendServerMessage(KinectTask.JOIN);
             print("Server JOIN request sent");
         }
         catch (Exception x)
@@ -500,15 +404,11 @@ public class KinectProvider2D : MonoBehaviour
         }
     }
 
-    void LeaveServer(string clientName, ClientRole clientRole)
+    void LeaveServer(string clientName, EntityType clientRole)
     {
-
         try
         {
-            // TODO: Make this a string builder, and not a either/or switch
-            string message = "LEAVE" + "|" + clientRole + "|" + clientName;
-            byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
-            serverSocket.SendTo(data, serverEndpoint);
+            SendServerMessage(KinectTask.LEAVE);
             print("Server LEAVE request sent");
         }
         catch (Exception x)
@@ -517,172 +417,245 @@ public class KinectProvider2D : MonoBehaviour
         }
     }
 
-    private void OnDataRecieved(object sender, SocketAsyncEventArgs e)
+    private void ProcessMessage(KinectTask task, string[] taskVariables)
     {
-        string recieved = Encoding.ASCII.GetString(e.Buffer);
-        //print("Recieved: " + recieved);
-        string[] split = recieved.Split('|');
-        switch (split[0])
+        int frameNumber, blockNumber;
+        FrameType frameType;
+        switch (task)
         {
-            case "CONFIRM":
-                switch (split[1])
+            case KinectTask.CONFIRM:
+                KinectTask confirmedTask = (KinectTask)Enum.Parse(typeof(KinectTask), taskVariables[0]);
+                int frameNum, blockNum;
+                FrameType type;
+                switch (confirmedTask)
                 {
-                    case "JOIN":
-                        if (split[3].Contains(providerName)) // this is a gross hack to get around blank space after the split - fix it
-                        {
-                            print("Successfully joined server as " + split[2] + ":" + split[3]);
-                            connectionState = ConnectionState.JoinedServer;
-                        }
+                    case KinectTask.FINISHFRAME:
+                        frameNum = int.Parse(taskVariables[1]);
+                        type = (FrameType)Enum.Parse(typeof(FrameType), taskVariables[2]);
+                        if (frameNum == currentFramePair.frameNumber && type == FrameType.COLOR)
+                            currentFramePair.color.isFinished = true;
+                        else if (frameNum == currentFramePair.frameNumber && type == FrameType.DEPTH)
+                            currentFramePair.depth.isFinished = true;
+                        print("Data transfer finished for " + frameNum + " ( " + type + ")");
                         break;
-                    case "LEAVE":
-                        if (split[3].Contains(providerName)) // this is a gross hack to get around blank space after the split - fix it
-                        {
-                            print("Successfully left server as " + split[2] + ":" + split[3]);
-                            connectionState = ConnectionState.Disconnected;
-                        }
+
+                    case KinectTask.ADDFRAME:
+                        frameNum = int.Parse(taskVariables[1]);
+                        type = (FrameType)Enum.Parse(typeof(FrameType), taskVariables[2]);
+                        print("Frame " + frameNum + "(" + type + ") was successfully added to the server");
                         break;
-                    case "PROVIDE":
-                        if (split[2].Contains(providerName)) // this is a gross hack to get around blank space after the split - fix it
-                        {
-                            //print("Successfully sent frame " + split[3] + " to server");
-                        }
+
+                    case KinectTask.ADDBLOCK:
+                        frameNum = int.Parse(taskVariables[1]);
+                        type = (FrameType)Enum.Parse(typeof(FrameType), taskVariables[2]);
+                        blockNum = int.Parse(taskVariables[3]);
+                        print("Frame " + frameNum + "(" + type + ") Block # " + blockNum + " was successfully added to the server");
                         break;
-                    default:
-                        print(split[1]);
+
+                    case KinectTask.JOIN:
+                        EntityType role = (EntityType)Enum.Parse(typeof(EntityType), taskVariables[1]);
+                        string name = taskVariables[2];
+                        print("Successfully joined server as " + name + "(" + role + ")");
+                        connectionState = ConnectionState.JoinedServer;
                         break;
                 }
                 break;
-            case "NOTICE":
-                switch (split[1])
+            case KinectTask.ALERT:
+                KinectTask alertedTask = (KinectTask)Enum.Parse(typeof(KinectTask), taskVariables[0]);
+                print("Alerted: " + alertedTask);
+                break;
+            case KinectTask.FAIL:
+                KinectTask failedTask = (KinectTask)Enum.Parse(typeof(KinectTask), taskVariables[0]);
+                FailReason failedReason = (FailReason)Enum.Parse(typeof(FailReason), taskVariables[1]);
+                print("Failed: " + failedTask + "(" + failedReason + ")");
+
+                if (failedTask == KinectTask.ADDBLOCK && failedReason == FailReason.MISSINGFRAME) {
+                    currentFramePair.color.notifyServer();
+                    currentFramePair.depth.notifyServer();
+                }
+                break;
+            case KinectTask.REQUESTBLOCK:
+                frameNumber = int.Parse(taskVariables[0]);
+                frameType = (FrameType)Enum.Parse(typeof(FrameType), taskVariables[1]);
+                blockNumber = int.Parse(taskVariables[2]);
+                print("Block Requested: " + frameNumber + "||" + frameType + "||" + blockNumber);
+                if(currentFramePair.frameNumber == frameNumber)
                 {
-                    case "JOIN":
-                        print(split[2] + " " + split[3] + " has joined the server");
-                        break;
-                    case "LEAVE":
-                        print(split[2] + " " + split[3] + " has left the server");
-                        break;
-                    case "PROVIDE":
-                        //print("Frame " + split[3] + " recieved from provider " + split[2]);
-                        break;
-                    default:
-                        print(split[1]);
-                        break;
+                    currentFramePair.sendBlock(frameType, blockNumber);
                 }
                 break;
             default:
-                print(recieved);
                 break;
         }
     }
 
-    void SendFrameToServer(int frameNumber, string frameData)
+    private void OnDataRecieved(object sender, SocketAsyncEventArgs e)
     {
-        if (connectionState == ConnectionState.JoinedServer)
-        {
-            try
-            {
-                string message = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + frameData;
+        string received = Encoding.ASCII.GetString(e.Buffer);
+        //print("Recieved: " + received);
+        string[] split = received.Split(majorDelimiter);
+        EntityType entityType = (EntityType)Enum.Parse(typeof(EntityType), split[0]);
+        string entityName = split[1];
+        KinectTask task = (KinectTask)Enum.Parse(typeof(KinectTask), split[2]);
+        string[] taskVariables = split[3].Split(minorDelimiter);
+        ProcessMessage(task, taskVariables);
+    }
 
-                byte[] data = System.Text.Encoding.UTF8.GetBytes(message);
-                serverSocket.SendTo(data, serverEndpoint);
-                //print("Frame " + frameNumber + " sent to server");
-            }
-            catch (Exception x)
+    public class FramePair
+    {
+        public int frameNumber;
+        public Frame color;
+        public Frame depth;
+        public bool transmissionStarted;
+        public bool transmissionFinished
+        {
+            get
             {
-                print("Error: " + x.ToString());
+                return (color.isFinished && depth.isFinished);
             }
+        }
+
+        public FramePair(KinectProvider2D provider, int frameNumber, byte[] colorData, byte[] depthData, KinectCompressionType compressionType)
+        {
+            this.frameNumber = frameNumber;
+            // ToArray is used to make a copy of the arrays in memory that wont be touched by the capture thread
+            color = new Frame(provider, frameNumber, colorData.ToArray(), FrameType.COLOR, compressionType);
+            depth = new Frame(provider, frameNumber, depthData.ToArray(), FrameType.DEPTH, compressionType);
+        }
+        
+        public void SendFramePairToServer(int maxBytesPerBlock)
+        {
+            transmissionStarted = true;
+            color.prepareFrame(maxBytesPerBlock);
+            color.notifyServer();
+            color.sendAllBlocks();
+            color.sendFrameFinishedSignaltoServer();
+
+            depth.prepareFrame(maxBytesPerBlock);
+            depth.notifyServer();
+            depth.sendAllBlocks();
+            depth.sendFrameFinishedSignaltoServer();
+        }
+
+        public void sendBlock(FrameType type, int blockNumber)
+        {
+            switch (type)
+            {
+                case FrameType.COLOR:
+                    color.sendBlock(blockNumber);
+                    break;
+                case FrameType.DEPTH:
+                    depth.sendBlock(blockNumber);
+                    break;
+            }
+        }
+
+    }
+
+    public class Frame
+    {
+        public KinectProvider2D provider;
+        public int frameNumber;
+        public byte[] raw;
+        public byte[] compressed;
+        public List<string> blocks;
+        public KinectCompressionType compressionType;
+        public FrameType type;
+        public int numberOfBlocks;
+        public KinectConfiguration configuration;
+        public bool isFinished;
+
+        public Frame(KinectProvider2D provider, int frameNumber, byte[] raw, FrameType type, KinectCompressionType compressionType)
+        {
+            this.provider = provider;
+            this.configuration = provider.kinectSettings;
+            this.frameNumber = frameNumber;
+            this.raw = raw;
+            this.type = type;
+            this.compressionType = compressionType;
+        }
+
+        public static byte[] CompressLZ4(byte[] data)
+        {
+            byte[] compressedArray = new byte[LZ4Codec.MaximumOutputSize(data.Length)];
+            int num = LZ4Codec.Encode(data, 0, data.Length, compressedArray, 0, compressedArray.Length, LZ4Level.L00_FAST);
+            Array.Resize(ref compressedArray, num);
+            return compressedArray;
+        }
+
+        public void prepareFrame( int maxBytesPerBlock)
+        {
+            string finalData = "";
+            switch (compressionType)
+            {
+                case KinectCompressionType.NONE:
+                    finalData = Convert.ToBase64String(raw);
+                    break;
+                case KinectCompressionType.LZ4:
+                    finalData = Convert.ToBase64String(CompressDataLZ4(raw));
+                    break;
+            }
+
+            blocks = new List<string>();
+            for (int i = 0; i < finalData.Length; i += maxBytesPerBlock)
+            {
+                if ((i + maxBytesPerBlock) < finalData.Length)
+                    blocks.Add(finalData.Substring(i, maxBytesPerBlock));
+                else
+                    blocks.Add(finalData.Substring(i));
+            }
+            numberOfBlocks = blocks.Count;
+            print(numberOfBlocks);
+        }
+
+        public void notifyServer()
+        {
+            provider.SendServerMessage(KinectTask.ADDFRAME, new object[] { frameNumber, type, numberOfBlocks, compressionType, configuration.Serialized });
+        }
+
+        public void sendFrameFinishedSignaltoServer()
+        {
+            provider.SendServerMessage(KinectTask.FINISHFRAME, new object[] {frameNumber, type});
+        }
+
+        public void sendAllBlocks()
+        {
+            for (int i = 0; i < numberOfBlocks; i++)
+            {
+                provider.SendServerMessage(KinectTask.ADDBLOCK, new object[] { frameNumber, type, i, blocks[i] });
+            }
+        }
+
+        public void sendBlock(int blockNumber)
+        {
+            provider.SendServerMessage(KinectTask.ADDBLOCK, new object[] { frameNumber, type, blockNumber, blocks[blockNumber]});
+        }
+
+    }
+
+    public FramePair currentFramePair;
+
+    public bool MaintainFramePair(byte[] colorData, byte[] depthData, KinectCompressionType compressionType)
+    {
+        if (currentFramePair == null || currentFramePair.transmissionFinished)
+        {
+            int lastFrameNumber = 0;
+            if(currentFramePair != null)
+            {
+                lastFrameNumber = currentFramePair.frameNumber;
+            }
+            currentFramePair = new FramePair(this, lastFrameNumber+1, colorData, depthData, compressionType);
+            return true;
+        }
+        else
+        {
+            return false;
         }
     }
 
-    public void SplitAndSend(int maxBytesPerMessage, int frameNumber, string frameData)
-    {
-        //print(frameData.Length);
-        List<string> segments = new List<string>();
-
-        int numberOfSegments = 0;
-        int availableBytesPerMessage = maxBytesPerMessage - 50; // Subtract 50 extra for the header
-
-        for (int i = 0; i < frameData.Length;)
-        {
-            if ((frameData.Length - i - 1) > availableBytesPerMessage)
-            {
-                segments.Add(frameData.Substring(i, availableBytesPerMessage));
-                i += availableBytesPerMessage;
-                numberOfSegments++;
-            }
-            else
-            {
-                segments.Add(frameData.Substring(i, frameData.Length - i));
-                i += availableBytesPerMessage;
-                numberOfSegments++;
-            }
-        }
-        print(segments.Count);
-        string messageHeader = "PROVIDE" + "|" + providerName + "|" + frameNumber + "|" + numberOfSegments + "|";
-
-        for (int s = 0; s < segments.Count; s++)
-        {
-            byte[] data = System.Text.Encoding.UTF8.GetBytes(messageHeader + s + "|" + segments[s]);
-            serverSocket.SendTo(data, serverEndpoint);
-        }
-    }
 
     #endregion
 
-    #region IMU
-
-    private async Task IMULoop(Device device)
-    {
-        lastFrame = DateTime.Now;
-        currentAngles = this.transform.rotation.eulerAngles;
-        while (true)
-        {
-            if (collectIMUData)
-            {
-                ImuSample imuSample = new ImuSample();
-                await Task.Run(() => imuSample = device.GetImuSample()).ConfigureAwait(true);
-                dt = (DateTime.Now - lastFrame).Milliseconds;
-                lastFrame = DateTime.Now;
-                currentAngles = ComplementaryFilterEuler(imuSample, currentAngles, dt / 1000);
-                this.transform.rotation = Quaternion.Euler(currentAngles);
-            }
-            else
-            {
-                await Task.Run(() => { });
-            }
-        }
-    }
-
-    Vector3 ComplementaryFilterEuler(ImuSample sample, Vector3 currentOrientation, float dt)
-    {
-        // Integrate the gyroscope data -> int(angularSpeed) = angle
-        float[] accData = { sample.AccelerometerSample.X, sample.AccelerometerSample.Y, sample.AccelerometerSample.Z };
-        float[] gyrData = { sample.GyroSample.X, sample.GyroSample.Y, sample.GyroSample.Z };
-
-        currentOrientation.x += (dt * gyrData[1]) * (180f / (float)Math.PI);    // Angle around the X-axis
-        currentOrientation.y += (dt * gyrData[2]) * (180f / (float)Math.PI);     // Angle around the Y-axis
-        currentOrientation.z += (dt * gyrData[0]) * (180f / (float)Math.PI);     // Angle around the Z-axis
-
-        currentOrientation.x = ((currentOrientation.x % 360) + 360) % 360;
-        currentOrientation.y = ((currentOrientation.y % 360) + 360) % 360;
-        currentOrientation.z = ((currentOrientation.z % 360) + 360) % 360;
-
-        // Compensate for drift with accelerometer data if in force in range
-        float forceMagnitudeApprox = Math.Abs(accData[0] / 9.8f) + Math.Abs(accData[1] / 9.8f) + Math.Abs(accData[2] / 9.8f);
-        if (forceMagnitudeApprox > accelerometerMinValid && forceMagnitudeApprox < accelerometerMaxValid)
-        {
-            float roll = Mathf.Atan2(accData[1], accData[2]) * (180f / Mathf.PI) - 180;
-            roll = ((roll % 360) + 360) % 360;
-
-            float pitch = Mathf.Atan2(accData[2], accData[0]) * (180f / Mathf.PI) - 270;
-            pitch = ((pitch % 360) + 360) % 360;
-
-            currentOrientation.x = Mathf.LerpAngle(currentOrientation.x, pitch, accelerometerWeighting);
-            currentOrientation.z = Mathf.LerpAngle(currentOrientation.z, roll, accelerometerWeighting);
-        }
-
-        return currentOrientation;
-    }
-    #endregion
+  
 
 }

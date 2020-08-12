@@ -26,19 +26,19 @@ public class MouseOrbit : MonoBehaviour
     }
 
 
-    bool enabled = false;
+    bool useMouseControls = false;
     bool clicked = false;
     void LateUpdate()
     {
         if (Input.GetMouseButtonDown(0))
         {
             clicked = true;
-            enabled = true;
+            useMouseControls = true;
         }
         if (Input.GetMouseButtonUp(0))
             clicked = false;
 
-        if (target && enabled) 
+        if (target && useMouseControls) 
         {
             if (clicked)
             {

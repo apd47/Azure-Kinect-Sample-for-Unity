@@ -1,0 +1,43 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+Texture2D<float3> ColorTex;
+Texture2D<float3> DepthTex;
+
+uniform RWStructuredBuffer<float3> ColorResultBuffer; 
+uniform RWStructuredBuffer<float3> DepthResultBuffer;
+
+SamplerState _PointClamp, _PointRepeat;
+int _MatrixX, _MatrixY;
+
+int GetBufferIndex2D(uint2 indices, uint2 matrixSize) {
+	return indices.x * matrixSize.y + indices.y;
+}
+
+uint2 GetTextureIndex2D(uint index, uint2 matrixSize) {
+	uint2 indices = uint2(0, 0);
+	indices.x = index / matrixSize.y;
+	indices.y = index - indices.x * matrixSize.y;
+	return indices;
+}
+
+#pragma kernel ToBuffers
+[numthreads(16, 16, 1)]
+void ToBuffers(uint3 id : SV_DispatchThreadID)
+{
+	uint2 matrixSize = uint2(_MatrixX, _MatrixY);
+
+	float2 uv = float2((float)id.x / matrixSize.x, (float)id.y / matrixSize.y);
+
+	float3 col = ColorTex.SampleLevel(_PointClamp, uv, 0);
+	uint2 index = uint2(id.x, matrixSize.y - id.y);
+	ColorResultBuffer[GetBufferIndex2D(index, matrixSize)] = col.rgb;
+
+	float depth = DepthTex.SampleLevel(_PointClamp, uv.xy, 0).r;
+	DepthResultBuffer[GetBufferIndex2D(index, matrixSize)] = float3(depth, depth, depth);
+
+}
+
+
+

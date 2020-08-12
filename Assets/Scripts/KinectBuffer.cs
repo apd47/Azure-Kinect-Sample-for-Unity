@@ -13,13 +13,11 @@ using System.Collections.Generic;
 using System.Data.SqlTypes;
 using K4os.Compression.LZ4;
 
-public class KinectBuffer : MonoBehaviour
+public class KinectBuffer : KinectProvider
 {
     #region Variables
     [Header("Device")]
-    public int deviceID = 0;
     public bool collectCameraData;
-    public KinectConfiguration kinectSettings;
     Device device;
     Transformation transformation;
     bool running = true;
@@ -59,10 +57,6 @@ public class KinectBuffer : MonoBehaviour
 
     [Header("Networking")]
     public bool sendToServer;
-    public string providerName;
-    public string serverHostname;
-    public int serverPort;
-    public int maxPacketBytes = 1024;
     ConnectionState connectionState = ConnectionState.Disconnected;
     IPEndPoint serverEndpoint;
     Socket serverSocket;
@@ -127,7 +121,7 @@ public class KinectBuffer : MonoBehaviour
 
         if (connectionState != ConnectionState.Disconnected)
         {
-            LeaveServer(providerName, ClientRole.PROVIDER);
+            LeaveServer(providerName, EntityType.PROVIDER);
             serverSocket.Close();
         }
     }
@@ -453,13 +447,13 @@ public class KinectBuffer : MonoBehaviour
 
     public void Join()
     {
-        JoinServer(providerName, ClientRole.PROVIDER);
+        JoinServer(providerName, EntityType.PROVIDER);
     }
 
     public void Leave()
     {
         sendToServer = false;
-        LeaveServer(providerName, ClientRole.PROVIDER);
+        LeaveServer(providerName, EntityType.PROVIDER);
     }
 
     public void StartSendingFrames()
@@ -472,7 +466,7 @@ public class KinectBuffer : MonoBehaviour
         sendToServer = false;
     }
 
-    void JoinServer(string clientName, ClientRole clientRole)
+    void JoinServer(string clientName, EntityType clientRole)
     {
         try
         {
@@ -500,7 +494,7 @@ public class KinectBuffer : MonoBehaviour
         }
     }
 
-    void LeaveServer(string clientName, ClientRole clientRole)
+    void LeaveServer(string clientName, EntityType clientRole)
     {
 
         try
